@@ -1,17 +1,28 @@
-from django import forms
-
-from utilities.forms import BootstrapMixin, DynamicModelChoiceField, ExpandableNameField
-from .models import VirtualMachine
+from django.utils.translation import gettext_lazy as _
+from utilities.forms.fields import ExpandableNameField
+from .model_forms import VirtualDiskForm, VMInterfaceForm
 
 __all__ = (
+    'VirtualDiskCreateForm',
     'VMInterfaceCreateForm',
 )
 
 
-class VMInterfaceCreateForm(BootstrapMixin, forms.Form):
-    virtual_machine = DynamicModelChoiceField(
-        queryset=VirtualMachine.objects.all()
+class VMInterfaceCreateForm(VMInterfaceForm):
+    name = ExpandableNameField(
+        label=_('Name'),
     )
-    name_pattern = ExpandableNameField(
-        label='Name'
+    replication_fields = ('name',)
+
+    class Meta(VMInterfaceForm.Meta):
+        exclude = ('name',)
+
+
+class VirtualDiskCreateForm(VirtualDiskForm):
+    name = ExpandableNameField(
+        label=_('Name'),
     )
+    replication_fields = ('name',)
+
+    class Meta(VirtualDiskForm.Meta):
+        exclude = ('name',)

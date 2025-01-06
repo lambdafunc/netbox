@@ -1,3 +1,6 @@
-<a href="{{ url }}" class="btn btn-sm btn-success" role="button">
-    <i class="mdi mdi-content-copy" aria-hidden="true"></i>&nbsp;Clone
-</a>
+{% load i18n %}
+{% if url %}
+  <a href="{{ url }}" class="btn btn-green" role="button">
+    <i class="mdi mdi-content-copy" aria-hidden="true"></i> {% trans "Clone" %}
+  </a>
+{% endif %}

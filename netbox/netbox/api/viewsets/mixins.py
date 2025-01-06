@@ -1,15 +1,77 @@
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
+from django.http import Http404
 from rest_framework import status
 from rest_framework.response import Response
 
+from core.models import ObjectType
+from extras.models import ExportTemplate
 from netbox.api.serializers import BulkOperationSerializer
 
 __all__ = (
-    'BulkUpdateModelMixin',
     'BulkDestroyModelMixin',
+    'BulkUpdateModelMixin',
+    'CustomFieldsMixin',
+    'ExportTemplatesMixin',
     'ObjectValidationMixin',
+    'SequentialBulkCreatesMixin',
 )
+
+
+class CustomFieldsMixin:
+    """
+    For models which support custom fields, populate the `custom_fields` context.
+    """
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+
+        if hasattr(self.queryset.model, 'custom_fields'):
+            object_type = ObjectType.objects.get_for_model(self.queryset.model)
+            context.update({
+                'custom_fields': object_type.custom_fields.all(),
+            })
+
+        return context
+
+
+class ExportTemplatesMixin:
+    """
+    Enable ExportTemplate support for list views.
+    """
+    def list(self, request, *args, **kwargs):
+        if 'export' in request.GET:
+            object_type = ObjectType.objects.get_for_model(self.get_serializer_class().Meta.model)
+            et = ExportTemplate.objects.filter(object_types=object_type, name=request.GET['export']).first()
+            if et is None:
+                raise Http404
+            queryset = self.filter_queryset(self.get_queryset())
+            return et.render_to_response(queryset)
+
+        return super().list(request, *args, **kwargs)
+
+
+class SequentialBulkCreatesMixin:
+    """
+    Perform bulk creation of new objects sequentially, rather than all at once. This ensures that any validation
+    which depends on the evaluation of existing objects (such as checking for free space within a rack) functions
+    appropriately.
+    """
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        if not isinstance(request.data, list):
+            # Creating a single object
+            return super().create(request, *args, **kwargs)
+
+        return_data = []
+        for data in request.data:
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            return_data.append(serializer.data)
+
+        headers = self.get_success_headers(serializer.data)
+
+        return Response(return_data, status=status.HTTP_201_CREATED, headers=headers)
 
 
 class BulkUpdateModelMixin:
@@ -30,11 +92,14 @@ class BulkUpdateModelMixin:
         }
     ]
     """
+    def get_bulk_update_queryset(self):
+        return self.get_queryset()
+
     def bulk_update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         serializer = BulkOperationSerializer(data=request.data, many=True)
         serializer.is_valid(raise_exception=True)
-        qs = self.get_queryset().filter(
+        qs = self.get_bulk_update_queryset().filter(
             pk__in=[o['id'] for o in serializer.data]
         )
 
@@ -77,10 +142,13 @@ class BulkDestroyModelMixin:
         {"id": 456}
     ]
     """
+    def get_bulk_destroy_queryset(self):
+        return self.get_queryset()
+
     def bulk_destroy(self, request, *args, **kwargs):
         serializer = BulkOperationSerializer(data=request.data, many=True)
         serializer.is_valid(raise_exception=True)
-        qs = self.get_queryset().filter(
+        qs = self.get_bulk_destroy_queryset().filter(
             pk__in=[o['id'] for o in serializer.data]
         )
 
@@ -108,6 +176,5 @@ class ObjectValidationMixin:
             conforming_count = self.queryset.filter(pk__in=[obj.pk for obj in instance]).count()
             if conforming_count != len(instance):
                 raise ObjectDoesNotExist
-        else:
-            # Check that the instance is matched by the view's queryset
-            self.queryset.get(pk=instance.pk)
+        elif not self.queryset.filter(pk=instance.pk).exists():
+            raise ObjectDoesNotExist

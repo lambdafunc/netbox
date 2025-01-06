@@ -1,5 +1,6 @@
 import functools
 import re
+from django.utils.translation import gettext as _
 
 __all__ = (
     'Condition',
@@ -44,16 +45,19 @@ class Condition:
         bool: (EQ, CONTAINS),
         int: (EQ, GT, GTE, LT, LTE, CONTAINS),
         float: (EQ, GT, GTE, LT, LTE, CONTAINS),
-        list: (EQ, IN, CONTAINS)
+        list: (EQ, IN, CONTAINS),
+        type(None): (EQ,)
     }
 
     def __init__(self, attr, value, op=EQ, negate=False):
         if op not in self.OPERATORS:
-            raise ValueError(f"Unknown operator: {op}. Must be one of: {', '.join(self.OPERATORS)}")
+            raise ValueError(_("Unknown operator: {op}. Must be one of: {operators}").format(
+                op=op, operators=', '.join(self.OPERATORS)
+            ))
         if type(value) not in self.TYPES:
-            raise ValueError(f"Unsupported value type: {type(value)}")
+            raise ValueError(_("Unsupported value type: {value}").format(value=type(value)))
         if op not in self.TYPES[type(value)]:
-            raise ValueError(f"Invalid type for {op} operation: {type(value)}")
+            raise ValueError(_("Invalid type for {op} operation: {value}").format(op=op, value=type(value)))
 
         self.attr = attr
         self.value = value
@@ -64,8 +68,14 @@ class Condition:
         """
         Evaluate the provided data to determine whether it matches the condition.
         """
+        def _get(obj, key):
+            if isinstance(obj, list):
+                return [dict.get(i, key) for i in obj]
+
+            return dict.get(obj, key)
+
         try:
-            value = functools.reduce(dict.get, self.attr.split('.'), data)
+            value = functools.reduce(_get, self.attr.split('.'), data)
         except TypeError:
             # Invalid key path
             value = None
@@ -124,21 +134,24 @@ class ConditionSet:
     """
     def __init__(self, ruleset):
         if type(ruleset) is not dict:
-            raise ValueError(f"Ruleset must be a dictionary, not {type(ruleset)}.")
-        if len(ruleset) != 1:
-            raise ValueError(f"Ruleset must have exactly one logical operator (found {len(ruleset)})")
+            raise ValueError(_("Ruleset must be a dictionary, not {ruleset}.").format(ruleset=type(ruleset)))
 
-        # Determine the logic type
-        logic = list(ruleset.keys())[0]
-        if type(logic) is not str or logic.lower() not in (AND, OR):
-            raise ValueError(f"Invalid logic type: {logic} (must be '{AND}' or '{OR}')")
-        self.logic = logic.lower()
+        if len(ruleset) == 1:
+            self.logic = (list(ruleset.keys())[0]).lower()
+            if self.logic not in (AND, OR):
+                raise ValueError(_("Invalid logic type: must be 'AND' or 'OR'. Please check documentation."))
 
-        # Compile the set of Conditions
-        self.conditions = [
-            ConditionSet(rule) if is_ruleset(rule) else Condition(**rule)
-            for rule in ruleset[self.logic]
-        ]
+            # Compile the set of Conditions
+            self.conditions = [
+                ConditionSet(rule) if is_ruleset(rule) else Condition(**rule)
+                for rule in ruleset[self.logic]
+            ]
+        else:
+            try:
+                self.logic = None
+                self.conditions = [Condition(**ruleset)]
+            except TypeError:
+                raise ValueError(_("Incorrect key(s) informed. Please check documentation."))
 
     def eval(self, data):
         """

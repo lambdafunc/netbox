@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib.postgres.forms import SimpleArrayField
+from django.utils.translation import gettext_lazy as _
 
 
 class ConfigParam:
@@ -18,9 +19,20 @@ PARAMS = (
     # Banners
     ConfigParam(
         name='BANNER_LOGIN',
-        label='Login banner',
+        label=_('Login banner'),
         default='',
-        description="Additional content to display on the login page",
+        description=_("Additional content to display on the login page"),
+        field_kwargs={
+            'widget': forms.Textarea(
+                attrs={'class': 'vLargeTextField'}
+            ),
+        },
+    ),
+    ConfigParam(
+        name='BANNER_MAINTENANCE',
+        label=_('Maintenance banner'),
+        default='NetBox is currently in maintenance mode. Functionality may be limited.',
+        description=_('Additional content to display when in maintenance mode'),
         field_kwargs={
             'widget': forms.Textarea(
                 attrs={'class': 'vLargeTextField'}
@@ -29,9 +41,9 @@ PARAMS = (
     ),
     ConfigParam(
         name='BANNER_TOP',
-        label='Top banner',
+        label=_('Top banner'),
         default='',
-        description="Additional content to display at the top of every page",
+        description=_("Additional content to display at the top of every page"),
         field_kwargs={
             'widget': forms.Textarea(
                 attrs={'class': 'vLargeTextField'}
@@ -40,9 +52,9 @@ PARAMS = (
     ),
     ConfigParam(
         name='BANNER_BOTTOM',
-        label='Bottom banner',
+        label=_('Bottom banner'),
         default='',
-        description="Additional content to display at the bottom of every page",
+        description=_("Additional content to display at the bottom of every page"),
         field_kwargs={
             'widget': forms.Textarea(
                 attrs={'class': 'vLargeTextField'}
@@ -53,44 +65,67 @@ PARAMS = (
     # IPAM
     ConfigParam(
         name='ENFORCE_GLOBAL_UNIQUE',
-        label='Globally unique IP space',
-        default=False,
-        description="Enforce unique IP addressing within the global table",
+        label=_('Globally unique IP space'),
+        default=True,
+        description=_("Enforce unique IP addressing within the global table"),
         field=forms.BooleanField
     ),
     ConfigParam(
         name='PREFER_IPV4',
-        label='Prefer IPv4',
+        label=_('Prefer IPv4'),
         default=False,
-        description="Prefer IPv4 addresses over IPv6",
+        description=_("Prefer IPv4 addresses over IPv6"),
         field=forms.BooleanField
     ),
 
     # Racks
     ConfigParam(
         name='RACK_ELEVATION_DEFAULT_UNIT_HEIGHT',
-        label='Rack unit height',
+        label=_('Rack unit height'),
         default=22,
-        description="Default unit height for rendered rack elevations",
+        description=_("Default unit height for rendered rack elevations"),
         field=forms.IntegerField
     ),
     ConfigParam(
         name='RACK_ELEVATION_DEFAULT_UNIT_WIDTH',
-        label='Rack unit width',
+        label=_('Rack unit width'),
         default=220,
-        description="Default unit width for rendered rack elevations",
+        description=_("Default unit width for rendered rack elevations"),
+        field=forms.IntegerField
+    ),
+
+    # Power
+    ConfigParam(
+        name='POWERFEED_DEFAULT_VOLTAGE',
+        label=_('Powerfeed voltage'),
+        default=120,
+        description=_("Default voltage for powerfeeds"),
+        field=forms.IntegerField
+    ),
+    ConfigParam(
+        name='POWERFEED_DEFAULT_AMPERAGE',
+        label=_('Powerfeed amperage'),
+        default=15,
+        description=_("Default amperage for powerfeeds"),
+        field=forms.IntegerField
+    ),
+    ConfigParam(
+        name='POWERFEED_DEFAULT_MAX_UTILIZATION',
+        label=_('Powerfeed max utilization'),
+        default=80,
+        description=_("Default max utilization for powerfeeds"),
         field=forms.IntegerField
     ),
 
     # Security
     ConfigParam(
         name='ALLOWED_URL_SCHEMES',
-        label='Allowed URL schemes',
+        label=_('Allowed URL schemes'),
         default=(
             'file', 'ftp', 'ftps', 'http', 'https', 'irc', 'mailto', 'sftp', 'ssh', 'tel', 'telnet', 'tftp', 'vnc',
             'xmpp',
         ),
-        description="Permitted schemes for URLs in user-provided content",
+        description=_("Permitted schemes for URLs in user-provided content"),
         field=SimpleArrayField,
         field_kwargs={'base_field': forms.CharField()}
     ),
@@ -98,13 +133,13 @@ PARAMS = (
     # Pagination
     ConfigParam(
         name='PAGINATE_COUNT',
-        label='Default page size',
+        label=_('Default page size'),
         default=50,
         field=forms.IntegerField
     ),
     ConfigParam(
         name='MAX_PAGE_SIZE',
-        label='Maximum page size',
+        label=_('Maximum page size'),
         default=1000,
         field=forms.IntegerField
     ),
@@ -112,93 +147,68 @@ PARAMS = (
     # Validation
     ConfigParam(
         name='CUSTOM_VALIDATORS',
-        label='Custom validators',
+        label=_('Custom validators'),
         default={},
-        description="Custom validation rules (JSON)",
+        description=_("Custom validation rules (JSON)"),
         field=forms.JSONField,
         field_kwargs={
-            'widget': forms.Textarea(
-                attrs={'class': 'vLargeTextField'}
-            ),
+            'widget': forms.Textarea(),
         },
     ),
-
-    # NAPALM
     ConfigParam(
-        name='NAPALM_USERNAME',
-        label='NAPALM username',
-        default='',
-        description="Username to use when connecting to devices via NAPALM"
-    ),
-    ConfigParam(
-        name='NAPALM_PASSWORD',
-        label='NAPALM password',
-        default='',
-        description="Password to use when connecting to devices via NAPALM"
-    ),
-    ConfigParam(
-        name='NAPALM_TIMEOUT',
-        label='NAPALM timeout',
-        default=30,
-        description="NAPALM connection timeout (in seconds)",
-        field=forms.IntegerField
-    ),
-    ConfigParam(
-        name='NAPALM_ARGS',
-        label='NAPALM arguments',
+        name='PROTECTION_RULES',
+        label=_('Protection rules'),
         default={},
-        description="Additional arguments to pass when invoking a NAPALM driver (as JSON data)",
+        description=_("Deletion protection rules (JSON)"),
         field=forms.JSONField,
         field_kwargs={
-            'widget': forms.Textarea(
-                attrs={'class': 'vLargeTextField'}
-            ),
+            'widget': forms.Textarea(),
         },
     ),
 
     # User preferences
     ConfigParam(
         name='DEFAULT_USER_PREFERENCES',
-        label='Default preferences',
+        label=_('Default preferences'),
         default={},
-        description="Default preferences for new users",
+        description=_("Default preferences for new users"),
         field=forms.JSONField
     ),
 
     # Miscellaneous
     ConfigParam(
         name='MAINTENANCE_MODE',
-        label='Maintenance mode',
+        label=_('Maintenance mode'),
         default=False,
-        description="Enable maintenance mode",
+        description=_("Enable maintenance mode"),
         field=forms.BooleanField
     ),
     ConfigParam(
         name='GRAPHQL_ENABLED',
-        label='GraphQL enabled',
+        label=_('GraphQL enabled'),
         default=True,
-        description="Enable the GraphQL API",
+        description=_("Enable the GraphQL API"),
         field=forms.BooleanField
     ),
     ConfigParam(
         name='CHANGELOG_RETENTION',
-        label='Changelog retention',
+        label=_('Changelog retention'),
         default=90,
-        description="Days to retain changelog history (set to zero for unlimited)",
+        description=_("Days to retain changelog history (set to zero for unlimited)"),
         field=forms.IntegerField
     ),
     ConfigParam(
-        name='JOBRESULT_RETENTION',
-        label='Job result retention',
+        name='JOB_RETENTION',
+        label=_('Job result retention'),
         default=90,
-        description="Days to retain job result history (set to zero for unlimited)",
+        description=_("Days to retain job result history (set to zero for unlimited)"),
         field=forms.IntegerField
     ),
     ConfigParam(
         name='MAPS_URL',
-        label='Maps URL',
+        label=_('Maps URL'),
         default='https://maps.google.com/?q=',
-        description="Base URL for mapping geographic locations"
+        description=_("Base URL for mapping geographic locations")
     ),
 
 )

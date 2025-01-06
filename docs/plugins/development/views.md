@@ -51,15 +51,16 @@ This makes our view accessible at the URL `/plugins/animal-sounds/random/`. (Rem
 
 NetBox provides several generic view classes (documented below) to facilitate common operations, such as creating, viewing, modifying, and deleting objects. Plugins can subclass these views for their own use.
 
-| View Class         | Description                    |
-|--------------------|--------------------------------|
-| `ObjectView`       | View a single object           |
-| `ObjectEditView`   | Create or edit a single object |
-| `ObjectDeleteView` | Delete a single object         |
-| `ObjectListView`   | View a list of objects         |
-| `BulkImportView`   | Import a set of new objects    |
-| `BulkEditView`     | Edit multiple objects          |
-| `BulkDeleteView`   | Delete multiple objects        |
+| View Class           | Description                                            |
+|----------------------|--------------------------------------------------------|
+| `ObjectView`         | View a single object                                   |
+| `ObjectEditView`     | Create or edit a single object                         |
+| `ObjectDeleteView`   | Delete a single object                                 |
+| `ObjectChildrenView` | A list of child objects within the context of a parent |
+| `ObjectListView`     | View a list of objects                                 |
+| `BulkImportView`     | Import a set of new objects                            |
+| `BulkEditView`       | Edit multiple objects                                  |
+| `BulkDeleteView`     | Delete multiple objects                                |
 
 !!! warning
     Please note that only the classes which appear in this documentation are currently supported. Although other classes may be present within the `views.generic` module, they are not yet supported for use by plugins.
@@ -81,47 +82,60 @@ class ThingEditView(ObjectEditView):
 Below are the class definitions for NetBox's object views. These views handle CRUD actions for individual objects. The view, add/edit, and delete views each inherit from `BaseObjectView`, which is not intended to be used directly.
 
 ::: netbox.views.generic.base.BaseObjectView
+    options:
+      members:
+        - get_queryset
+        - get_object
+        - get_extra_context
 
 ::: netbox.views.generic.ObjectView
-    selection:
+    options:
       members:
-        - get_object
         - get_template_name
 
 ::: netbox.views.generic.ObjectEditView
-    selection:
+    options:
       members:
-        - get_object
         - alter_object
 
 ::: netbox.views.generic.ObjectDeleteView
-    selection:
+    options:
+      members: false
+
+::: netbox.views.generic.ObjectChildrenView
+    options:
       members:
-        - get_object
+        - get_children
+        - prep_table_data
 
 ## Multi-Object Views
 
 Below are the class definitions for NetBox's multi-object views. These views handle simultaneous actions for sets objects. The list, import, edit, and delete views each inherit from `BaseMultiObjectView`, which is not intended to be used directly.
 
 ::: netbox.views.generic.base.BaseMultiObjectView
+    options:
+      members:
+        - get_queryset
+        - get_extra_context
 
 ::: netbox.views.generic.ObjectListView
-    selection:
+    options:
       members:
         - get_table
         - export_table
         - export_template
 
 ::: netbox.views.generic.BulkImportView
-    selection:
-      members: false
+    options:
+      members:
+        - save_object
 
 ::: netbox.views.generic.BulkEditView
-    selection:
+    options:
       members: false
 
 ::: netbox.views.generic.BulkDeleteView
-    selection:
+    options:
       members:
         - get_form
 
@@ -130,29 +144,75 @@ Below are the class definitions for NetBox's multi-object views. These views han
 These views are provided to enable or enhance certain NetBox model features, such as change logging or journaling. These typically do not need to be subclassed: They can be used directly e.g. in a URL path.
 
 ::: netbox.views.generic.ObjectChangeLogView
-    selection:
+    options:
       members:
         - get_form
 
 ::: netbox.views.generic.ObjectJournalView
-    selection:
+    options:
       members:
         - get_form
 
 ## Extending Core Views
 
-Plugins can inject custom content into certain areas of the detail views of applicable models. This is accomplished by subclassing `PluginTemplateExtension`, designating a particular NetBox model, and defining the desired methods to render custom content. Four methods are available:
+### Additional Tabs
 
-* `left_page()` - Inject content on the left side of the page
-* `right_page()` - Inject content on the right side of the page
-* `full_width_page()` - Inject content across the entire bottom of the page
-* `buttons()` - Add buttons to the top of the page
+Plugins can "attach" a custom view to a core NetBox model by registering it with `register_model_view()`. To include a tab for this view within the NetBox UI, declare a TabView instance named `tab`, and add it to the template context dict:
+
+```python
+from dcim.models import Site
+from myplugin.models import Stuff
+from netbox.views import generic
+from utilities.views import ViewTab, register_model_view
+
+@register_model_view(Site, name='myview', path='some-other-stuff')
+class MyView(generic.ObjectView):
+    ...
+    tab = ViewTab(
+        label='Other Stuff',
+        badge=lambda obj: Stuff.objects.filter(site=obj).count(),
+        permission='myplugin.view_stuff'
+    )
+
+    def get(self, request, pk):
+        ...
+        return render(
+            request,
+            "myplugin/mytabview.html",
+            context={
+                "tab": self.tab,
+            },
+        )
+```
+
+::: utilities.views.register_model_view
+
+::: utilities.views.ViewTab
+
+### Extra Template Content
+
+Plugins can inject custom content into certain areas of core NetBox views. This is accomplished by subclassing `PluginTemplateExtension`, optionally designating one or more particular NetBox models, and defining the desired method(s) to render custom content. Five methods are available:
+
+| Method              | View        | Description                                         |
+|---------------------|-------------|-----------------------------------------------------|
+| `navbar()`          | All         | Inject content inside the top navigation bar        |
+| `list_buttons()`    | List view   | Add buttons to the top of the page                  |
+| `buttons()`         | Object view | Add buttons to the top of the page                  |
+| `alerts()`          | Object view | Inject content at the top of the page               |
+| `left_page()`       | Object view | Inject content on the left side of the page         |
+| `right_page()`      | Object view | Inject content on the right side of the page        |
+| `full_width_page()` | Object view | Inject content across the entire bottom of the page |
+
+!!! info "The `navbar()` and `alerts()` methods were introduced in NetBox v4.1."
 
 Additionally, a `render()` method is available for convenience. This method accepts the name of a template to render, and any additional context data you want to pass. Its use is optional, however.
 
-When a PluginTemplateExtension is instantiated, context data is assigned to `self.context`. Available data include:
+To control where the custom content is injected, plugin authors can specify an iterable of models by overriding the `models` attribute on the subclass. Extensions which do not specify a set of models will be invoked on every view, where supported.
 
-* `object` - The object being viewed
+When a PluginTemplateExtension is instantiated, context data is assigned to `self.context`. Available data includes:
+
+* `object` - The object being viewed (object views only)
+* `model` - The model of the list view (list views only)
 * `request` - The current request
 * `settings` - Global NetBox settings
 * `config` - Plugin-specific configuration parameters
@@ -162,11 +222,11 @@ For example, accessing `{{ request.user }}` within a template will return the cu
 Declared subclasses should be gathered into a list or tuple for integration with NetBox. By default, NetBox looks for an iterable named `template_extensions` within a `template_content.py` file. (This can be overridden by setting `template_extensions` to a custom value on the plugin's PluginConfig.) An example is below.
 
 ```python
-from extras.plugins import PluginTemplateExtension
+from netbox.plugins import PluginTemplateExtension
 from .models import Animal
 
 class SiteAnimalCount(PluginTemplateExtension):
-    model = 'dcim.site'
+    models = ['dcim.site']
 
     def right_page(self):
         return self.render('netbox_animal_sounds/inc/animal_count.html', extra_context={

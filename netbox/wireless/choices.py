@@ -1,3 +1,5 @@
+from django.utils.translation import gettext_lazy as _
+
 from utilities.choices import ChoiceSet
 
 
@@ -6,9 +8,25 @@ class WirelessRoleChoices(ChoiceSet):
     ROLE_STATION = 'station'
 
     CHOICES = (
-        (ROLE_AP, 'Access point'),
-        (ROLE_STATION, 'Station'),
+        (ROLE_AP, _('Access point')),
+        (ROLE_STATION, _('Station')),
     )
+
+
+class WirelessLANStatusChoices(ChoiceSet):
+    key = 'WirelessLAN.status'
+
+    STATUS_ACTIVE = 'active'
+    STATUS_RESERVED = 'reserved'
+    STATUS_DISABLED = 'disabled'
+    STATUS_DEPRECATED = 'deprecated'
+
+    CHOICES = [
+        (STATUS_ACTIVE, _('Active'), 'green'),
+        (STATUS_RESERVED, _('Reserved'), 'cyan'),
+        (STATUS_DISABLED, _('Disabled'), 'orange'),
+        (STATUS_DEPRECATED, _('Deprecated'), 'red'),
+    ]
 
 
 class WirelessChannelChoices(ChoiceSet):
@@ -446,10 +464,10 @@ class WirelessAuthTypeChoices(ChoiceSet):
     TYPE_WPA_ENTERPRISE = 'wpa-enterprise'
 
     CHOICES = (
-        (TYPE_OPEN, 'Open'),
+        (TYPE_OPEN, _('Open')),
         (TYPE_WEP, 'WEP'),
-        (TYPE_WPA_PERSONAL, 'WPA Personal (PSK)'),
-        (TYPE_WPA_ENTERPRISE, 'WPA Enterprise'),
+        (TYPE_WPA_PERSONAL, _('WPA Personal (PSK)')),
+        (TYPE_WPA_ENTERPRISE, _('WPA Enterprise')),
     )
 
 
@@ -459,7 +477,25 @@ class WirelessAuthCipherChoices(ChoiceSet):
     CIPHER_AES = 'aes'
 
     CHOICES = (
-        (CIPHER_AUTO, 'Auto'),
+        (CIPHER_AUTO, _('Auto')),
         (CIPHER_TKIP, 'TKIP'),
         (CIPHER_AES, 'AES'),
+    )
+
+
+class WirelessLinkDistanceUnitChoices(ChoiceSet):
+
+    # Metric
+    UNIT_KILOMETER = 'km'
+    UNIT_METER = 'm'
+
+    # Imperial
+    UNIT_MILE = 'mi'
+    UNIT_FOOT = 'ft'
+
+    CHOICES = (
+        (UNIT_KILOMETER, _('Kilometers')),
+        (UNIT_METER, _('Meters')),
+        (UNIT_MILE, _('Miles')),
+        (UNIT_FOOT, _('Feet')),
     )

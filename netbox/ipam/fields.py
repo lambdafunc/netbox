@@ -1,9 +1,21 @@
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
+from django.utils.translation import gettext as _
 from netaddr import AddrFormatError, IPNetwork
 
 from . import lookups, validators
 from .formfields import IPNetworkFormField
+
+__all__ = (
+    'ASNField',
+    'IPAddressField',
+    'IPNetworkField',
+)
+
+# BGP ASN bounds
+BGP_ASN_MIN = 1
+BGP_ASN_MAX = 2**32 - 1
 
 
 class BaseIPField(models.Field):
@@ -21,7 +33,7 @@ class BaseIPField(models.Field):
             # Always return a netaddr.IPNetwork object. (netaddr.IPAddress does not provide a mask.)
             return IPNetwork(value)
         except AddrFormatError:
-            raise ValidationError("Invalid IP address format: {}".format(value))
+            raise ValidationError(_("Invalid IP address format: {address}").format(address=value))
         except (TypeError, ValueError) as e:
             raise ValidationError(e)
 
@@ -93,3 +105,21 @@ IPAddressField.register_lookup(lookups.NetIn)
 IPAddressField.register_lookup(lookups.NetHostContained)
 IPAddressField.register_lookup(lookups.NetFamily)
 IPAddressField.register_lookup(lookups.NetMaskLength)
+IPAddressField.register_lookup(lookups.Host)
+IPAddressField.register_lookup(lookups.Inet)
+
+
+class ASNField(models.BigIntegerField):
+    description = "32-bit ASN field"
+    default_validators = [
+        MinValueValidator(BGP_ASN_MIN),
+        MaxValueValidator(BGP_ASN_MAX),
+    ]
+
+    def formfield(self, **kwargs):
+        defaults = {
+            'min_value': BGP_ASN_MIN,
+            'max_value': BGP_ASN_MAX,
+        }
+        defaults.update(**kwargs)
+        return super().formfield(**defaults)

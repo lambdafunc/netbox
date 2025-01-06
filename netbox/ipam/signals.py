@@ -30,14 +30,14 @@ def update_children_depth(prefix):
 def handle_prefix_saved(instance, created, **kwargs):
 
     # Prefix has changed (or new instance has been created)
-    if created or instance.vrf != instance._vrf or instance.prefix != instance._prefix:
+    if created or instance.vrf_id != instance._vrf_id or instance.prefix != instance._prefix:
 
         update_parents_children(instance)
         update_children_depth(instance)
 
         # If this is not a new prefix, clean up parent/children of previous prefix
         if not created:
-            old_prefix = Prefix(vrf=instance._vrf, prefix=instance._prefix)
+            old_prefix = Prefix(vrf_id=instance._vrf_id, prefix=instance._prefix)
             update_parents_children(old_prefix)
             update_children_depth(old_prefix)
 
@@ -52,13 +52,25 @@ def handle_prefix_deleted(instance, **kwargs):
 @receiver(pre_delete, sender=IPAddress)
 def clear_primary_ip(instance, **kwargs):
     """
-    When an IPAddress is deleted, trigger save() on any Devices/VirtualMachines for which it
-    was a primary IP.
+    When an IPAddress is deleted, trigger save() on any Devices/VirtualMachines for which it was a primary IP.
     """
     field_name = f'primary_ip{instance.family}'
-    device = Device.objects.filter(**{field_name: instance}).first()
-    if device:
+    if device := Device.objects.filter(**{field_name: instance}).first():
+        device.snapshot()
+        setattr(device, field_name, None)
         device.save()
-    virtualmachine = VirtualMachine.objects.filter(**{field_name: instance}).first()
-    if virtualmachine:
+    if virtualmachine := VirtualMachine.objects.filter(**{field_name: instance}).first():
+        virtualmachine.snapshot()
+        setattr(virtualmachine, field_name, None)
         virtualmachine.save()
+
+
+@receiver(pre_delete, sender=IPAddress)
+def clear_oob_ip(instance, **kwargs):
+    """
+    When an IPAddress is deleted, trigger save() on any Devices for which it was a OOB IP.
+    """
+    if device := Device.objects.filter(oob_ip=instance).first():
+        device.snapshot()
+        device.oob_ip = None
+        device.save()

@@ -1,5 +1,11 @@
-def is_htmx(request):
+__all__ = (
+    'htmx_partial',
+)
+
+
+def htmx_partial(request):
     """
-    Returns True if the request was made by HTMX; False otherwise.
+    Determines whether to render partial (versus complete) HTML content
+    in response to an HTMX request, based on the target element.
     """
-    return 'Hx-Request' in request.headers
+    return request.htmx and not request.htmx.boosted

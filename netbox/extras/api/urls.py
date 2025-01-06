@@ -1,48 +1,33 @@
-from netbox.api import NetBoxRouter
+from django.urls import include, path
+
+from netbox.api.routers import NetBoxRouter
 from . import views
 
 
 router = NetBoxRouter()
 router.APIRootView = views.ExtrasRootView
 
-# Webhooks
+router.register('event-rules', views.EventRuleViewSet)
 router.register('webhooks', views.WebhookViewSet)
-
-# Custom fields
 router.register('custom-fields', views.CustomFieldViewSet)
-
-# Custom links
+router.register('custom-field-choice-sets', views.CustomFieldChoiceSetViewSet)
 router.register('custom-links', views.CustomLinkViewSet)
-
-# Export templates
 router.register('export-templates', views.ExportTemplateViewSet)
-
-# Tags
+router.register('saved-filters', views.SavedFilterViewSet)
+router.register('bookmarks', views.BookmarkViewSet)
+router.register('notifications', views.NotificationViewSet)
+router.register('notification-groups', views.NotificationGroupViewSet)
+router.register('subscriptions', views.SubscriptionViewSet)
 router.register('tags', views.TagViewSet)
-
-# Image attachments
 router.register('image-attachments', views.ImageAttachmentViewSet)
-
-# Journal entries
 router.register('journal-entries', views.JournalEntryViewSet)
-
-# Config contexts
 router.register('config-contexts', views.ConfigContextViewSet)
-
-# Reports
-router.register('reports', views.ReportViewSet, basename='report')
-
-# Scripts
+router.register('config-templates', views.ConfigTemplateViewSet)
 router.register('scripts', views.ScriptViewSet, basename='script')
-
-# Change logging
-router.register('object-changes', views.ObjectChangeViewSet)
-
-# Job Results
-router.register('job-results', views.JobResultViewSet)
-
-# ContentTypes
-router.register('content-types', views.ContentTypeViewSet)
+router.register('object-types', views.ObjectTypeViewSet)
 
 app_name = 'extras-api'
-urlpatterns = router.urls
+urlpatterns = [
+    path('dashboard/', views.DashboardView.as_view(), name='dashboard'),
+    path('', include(router.urls)),
+]

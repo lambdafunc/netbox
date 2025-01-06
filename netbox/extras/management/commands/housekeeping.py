@@ -9,8 +9,7 @@ from django.db import DEFAULT_DB_ALIAS
 from django.utils import timezone
 from packaging import version
 
-from extras.models import JobResult
-from extras.models import ObjectChange
+from core.models import Job, ObjectChange
 from netbox.config import Config
 
 
@@ -37,7 +36,7 @@ class Command(BaseCommand):
                     f"clearing sessions; skipping."
                 )
 
-        # Delete expired ObjectRecords
+        # Delete expired ObjectChanges
         if options['verbosity']:
             self.stdout.write("[*] Checking for expired changelog records")
         if config.CHANGELOG_RETENTION:
@@ -64,15 +63,15 @@ class Command(BaseCommand):
                 f"\tSkipping: No retention period specified (CHANGELOG_RETENTION = {config.CHANGELOG_RETENTION})"
             )
 
-        # Delete expired JobResults
+        # Delete expired Jobs
         if options['verbosity']:
-            self.stdout.write("[*] Checking for expired jobresult records")
-        if config.JOBRESULT_RETENTION:
-            cutoff = timezone.now() - timedelta(days=config.JOBRESULT_RETENTION)
+            self.stdout.write("[*] Checking for expired jobs")
+        if config.JOB_RETENTION:
+            cutoff = timezone.now() - timedelta(days=config.JOB_RETENTION)
             if options['verbosity'] >= 2:
-                self.stdout.write(f"\tRetention period: {config.JOBRESULT_RETENTION} days")
+                self.stdout.write(f"\tRetention period: {config.JOB_RETENTION} days")
                 self.stdout.write(f"\tCut-off time: {cutoff}")
-            expired_records = JobResult.objects.filter(created__lt=cutoff).count()
+            expired_records = Job.objects.filter(created__lt=cutoff).count()
             if expired_records:
                 if options['verbosity']:
                     self.stdout.write(
@@ -81,20 +80,23 @@ class Command(BaseCommand):
                         ending=""
                     )
                     self.stdout.flush()
-                JobResult.objects.filter(created__lt=cutoff)._raw_delete(using=DEFAULT_DB_ALIAS)
+                Job.objects.filter(created__lt=cutoff).delete()
                 if options['verbosity']:
                     self.stdout.write("Done.", self.style.SUCCESS)
             elif options['verbosity']:
                 self.stdout.write("\tNo expired records found.", self.style.SUCCESS)
         elif options['verbosity']:
             self.stdout.write(
-                f"\tSkipping: No retention period specified (JOBRESULT_RETENTION = {config.JOBRESULT_RETENTION})"
+                f"\tSkipping: No retention period specified (JOB_RETENTION = {config.JOB_RETENTION})"
             )
 
         # Check for new releases (if enabled)
         if options['verbosity']:
             self.stdout.write("[*] Checking for latest release")
-        if settings.RELEASE_CHECK_URL:
+        if settings.ISOLATED_DEPLOYMENT:
+            if options['verbosity']:
+                self.stdout.write("\tSkipping: ISOLATED_DEPLOYMENT is enabled")
+        elif settings.RELEASE_CHECK_URL:
             headers = {
                 'Accept': 'application/vnd.github.v3+json',
             }
@@ -127,7 +129,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"\tRequest error: {exc}", self.style.ERROR)
         else:
             if options['verbosity']:
-                self.stdout.write(f"\tSkipping: RELEASE_CHECK_URL not set")
+                self.stdout.write("\tSkipping: RELEASE_CHECK_URL not set")
 
         if options['verbosity']:
             self.stdout.write("Finished.", self.style.SUCCESS)

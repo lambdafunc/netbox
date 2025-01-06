@@ -1,48 +1,14 @@
-{% extends 'dcim/device/base.html' %}
-{% load render_table from django_tables2 %}
-{% load helpers %}
-{% load static %}
+{% extends 'dcim/device/components_base.html' %}
+{% load i18n %}
 
-{% block content %}
-  {% include 'inc/table_controls_htmx.html' with table_modal="DeviceDeviceBayTable_config" %}
-  
-  <form method="post">
-    {% csrf_token %}
-
-    <div class="card">
-      <div class="card-body" id="object_list">
-        {% include 'htmx/table.html' %}
-      </div>
-    </div>
-
-    <div class="noprint bulk-buttons">
-        <div class="bulk-button-group">
-            {% if perms.dcim.change_devicebay %}
-                <button type="submit" name="_rename" formaction="{% url 'dcim:devicebay_bulk_rename' %}?return_url={% url 'dcim:device_devicebays' pk=object.pk %}" class="btn btn-outline-warning btn-sm">
-                    <i class="mdi mdi-pencil-outline" aria-hidden="true"></i> Rename
-                </button>
-                <button type="submit" name="_edit" formaction="{% url 'dcim:devicebay_bulk_edit' %}?device={{ object.pk }}&return_url={% url 'dcim:device_devicebays' pk=object.pk %}" class="btn btn-warning btn-sm">
-                    <i class="mdi mdi-pencil" aria-hidden="true"></i> Edit
-                </button>
-            {% endif %}
-            {% if perms.dcim.delete_devicebay %}
-                <button type="submit" formaction="{% url 'dcim:devicebay_bulk_delete' %}?return_url={% url 'dcim:device_devicebays' pk=object.pk %}" class="btn btn-outline-danger btn-sm">
-                    <i class="mdi mdi-trash-can-outline" aria-hidden="true"></i> Delete selected
-                </button>
-            {% endif %}
+{% block bulk_extra_controls %}
+    {{ block.super }}
+    {% if perms.dcim.add_devicebay %}
+        <div class="btn-group" role="group">
+            <a href="{% url 'dcim:devicebay_add' %}?device={{ object.pk }}&return_url={% url 'dcim:device_devicebays' pk=object.pk %}"
+               class="btn btn-primary">
+                <i class="mdi mdi-plus-thick" aria-hidden="true"></i> {% trans "Add Device Bays" %}
+            </a>
         </div>
-        {% if perms.dcim.add_devicebay %}
-            <div class="bulk-button-group">
-                <a href="{% url 'dcim:devicebay_add' %}?device={{ object.pk }}&return_url={% url 'dcim:device_devicebays' pk=object.pk %}" class="btn btn-primary btn-sm">
-                    <i class="mdi mdi-plus-thick" aria-hidden="true"></i> Add Device Bays
-                </a>
-            </div>
-        {% endif %}
-    </div>
-  </form>
-{% endblock %}
-
-{% block modals %}
-  {{ block.super }}
-  {% table_config_form table %}
-{% endblock modals %}
+    {% endif %}
+{% endblock bulk_extra_controls %}

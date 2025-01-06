@@ -1,13 +1,17 @@
-from netbox.forms import NetBoxModelCSVForm
+from django.contrib.contenttypes.models import ContentType
+from django.utils.translation import gettext_lazy as _
+
+from netbox.forms import NetBoxModelImportForm
 from tenancy.models import *
-from utilities.forms import CSVModelChoiceField, SlugField
+from utilities.forms.fields import CSVContentTypeField, CSVModelChoiceField, SlugField
 
 __all__ = (
-    'ContactCSVForm',
-    'ContactGroupCSVForm',
-    'ContactRoleCSVForm',
-    'TenantCSVForm',
-    'TenantGroupCSVForm',
+    'ContactAssignmentImportForm',
+    'ContactImportForm',
+    'ContactGroupImportForm',
+    'ContactRoleImportForm',
+    'TenantImportForm',
+    'TenantGroupImportForm',
 )
 
 
@@ -15,53 +19,56 @@ __all__ = (
 # Tenants
 #
 
-class TenantGroupCSVForm(NetBoxModelCSVForm):
+class TenantGroupImportForm(NetBoxModelImportForm):
     parent = CSVModelChoiceField(
+        label=_('Parent'),
         queryset=TenantGroup.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Parent group'
+        help_text=_('Parent group')
     )
     slug = SlugField()
 
     class Meta:
         model = TenantGroup
-        fields = ('name', 'slug', 'parent', 'description')
+        fields = ('name', 'slug', 'parent', 'description', 'tags')
 
 
-class TenantCSVForm(NetBoxModelCSVForm):
+class TenantImportForm(NetBoxModelImportForm):
     slug = SlugField()
     group = CSVModelChoiceField(
+        label=_('Group'),
         queryset=TenantGroup.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Assigned group'
+        help_text=_('Assigned group')
     )
 
     class Meta:
         model = Tenant
-        fields = ('name', 'slug', 'group', 'description', 'comments')
+        fields = ('name', 'slug', 'group', 'description', 'comments', 'tags')
 
 
 #
 # Contacts
 #
 
-class ContactGroupCSVForm(NetBoxModelCSVForm):
+class ContactGroupImportForm(NetBoxModelImportForm):
     parent = CSVModelChoiceField(
+        label=_('Parent'),
         queryset=ContactGroup.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Parent group'
+        help_text=_('Parent group')
     )
     slug = SlugField()
 
     class Meta:
         model = ContactGroup
-        fields = ('name', 'slug', 'parent', 'description')
+        fields = ('name', 'slug', 'parent', 'description', 'tags')
 
 
-class ContactRoleCSVForm(NetBoxModelCSVForm):
+class ContactRoleImportForm(NetBoxModelImportForm):
     slug = SlugField()
 
     class Meta:
@@ -69,14 +76,36 @@ class ContactRoleCSVForm(NetBoxModelCSVForm):
         fields = ('name', 'slug', 'description')
 
 
-class ContactCSVForm(NetBoxModelCSVForm):
+class ContactImportForm(NetBoxModelImportForm):
     group = CSVModelChoiceField(
+        label=_('Group'),
         queryset=ContactGroup.objects.all(),
         required=False,
         to_field_name='name',
-        help_text='Assigned group'
+        help_text=_('Assigned group')
     )
 
     class Meta:
         model = Contact
-        fields = ('name', 'title', 'phone', 'email', 'address', 'link', 'group', 'comments')
+        fields = ('name', 'title', 'phone', 'email', 'address', 'link', 'group', 'description', 'comments', 'tags')
+
+
+class ContactAssignmentImportForm(NetBoxModelImportForm):
+    object_type = CSVContentTypeField(
+        queryset=ContentType.objects.all(),
+        help_text=_("One or more assigned object types")
+    )
+    contact = CSVModelChoiceField(
+        queryset=Contact.objects.all(),
+        to_field_name='name',
+        help_text=_('Assigned contact')
+    )
+    role = CSVModelChoiceField(
+        queryset=ContactRole.objects.all(),
+        to_field_name='name',
+        help_text=_('Assigned role')
+    )
+
+    class Meta:
+        model = ContactAssignment
+        fields = ('object_type', 'object_id', 'contact', 'priority', 'role')

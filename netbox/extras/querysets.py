@@ -5,6 +5,12 @@ from extras.models.tags import TaggedItem
 from utilities.query_functions import EmptyGroupByJSONBAgg
 from utilities.querysets import RestrictedQuerySet
 
+__all__ = (
+    'ConfigContextModelQuerySet',
+    'ConfigContextQuerySet',
+    'NotificationQuerySet',
+)
+
 
 class ConfigContextQuerySet(RestrictedQuerySet):
 
@@ -16,11 +22,11 @@ class ConfigContextQuerySet(RestrictedQuerySet):
           aggregate_data: If True, use the JSONBAgg aggregate function to return only the list of JSON data objects
         """
 
-        # `device_role` for Device; `role` for VirtualMachine
-        role = getattr(obj, 'device_role', None) or obj.role
+        role = obj.role
 
-        # Device type assignment is relevant only for Devices
+        # Device type and location assignment is relevant only for Devices
         device_type = getattr(obj, 'device_type', None)
+        location = getattr(obj, 'location', None)
 
         # Get assigned cluster, group, and type (if any)
         cluster = getattr(obj, 'cluster', None)
@@ -42,6 +48,7 @@ class ConfigContextQuerySet(RestrictedQuerySet):
             Q(regions__in=regions) | Q(regions=None),
             Q(site_groups__in=sitegroups) | Q(site_groups=None),
             Q(sites=obj.site) | Q(sites=None),
+            Q(locations=location) | Q(locations=None),
             Q(device_types=device_type) | Q(device_types=None),
             Q(roles=role) | Q(roles=None),
             Q(platforms=obj.platform) | Q(platforms=None),
@@ -114,37 +121,42 @@ class ConfigContextModelQuerySet(RestrictedQuerySet):
         )
 
         if self.model._meta.model_name == 'device':
+            base_query.add((Q(locations=OuterRef('location')) | Q(locations=None)), Q.AND)
             base_query.add((Q(device_types=OuterRef('device_type')) | Q(device_types=None)), Q.AND)
-            base_query.add((Q(roles=OuterRef('device_role')) | Q(roles=None)), Q.AND)
-            base_query.add((Q(sites=OuterRef('site')) | Q(sites=None)), Q.AND)
-            region_field = 'site__region'
-            sitegroup_field = 'site__group'
 
         elif self.model._meta.model_name == 'virtualmachine':
-            base_query.add((Q(roles=OuterRef('role')) | Q(roles=None)), Q.AND)
-            base_query.add((Q(sites=OuterRef('cluster__site')) | Q(sites=None)), Q.AND)
             base_query.add(Q(device_types=None), Q.AND)
-            region_field = 'cluster__site__region'
-            sitegroup_field = 'cluster__site__group'
+
+        base_query.add((Q(roles=OuterRef('role')) | Q(roles=None)), Q.AND)
+        base_query.add((Q(sites=OuterRef('site')) | Q(sites=None)), Q.AND)
 
         base_query.add(
             (Q(
-                regions__tree_id=OuterRef(f'{region_field}__tree_id'),
-                regions__level__lte=OuterRef(f'{region_field}__level'),
-                regions__lft__lte=OuterRef(f'{region_field}__lft'),
-                regions__rght__gte=OuterRef(f'{region_field}__rght'),
+                regions__tree_id=OuterRef('site__region__tree_id'),
+                regions__level__lte=OuterRef('site__region__level'),
+                regions__lft__lte=OuterRef('site__region__lft'),
+                regions__rght__gte=OuterRef('site__region__rght'),
             ) | Q(regions=None)),
             Q.AND
         )
 
         base_query.add(
             (Q(
-                site_groups__tree_id=OuterRef(f'{sitegroup_field}__tree_id'),
-                site_groups__level__lte=OuterRef(f'{sitegroup_field}__level'),
-                site_groups__lft__lte=OuterRef(f'{sitegroup_field}__lft'),
-                site_groups__rght__gte=OuterRef(f'{sitegroup_field}__rght'),
+                site_groups__tree_id=OuterRef('site__group__tree_id'),
+                site_groups__level__lte=OuterRef('site__group__level'),
+                site_groups__lft__lte=OuterRef('site__group__lft'),
+                site_groups__rght__gte=OuterRef('site__group__rght'),
             ) | Q(site_groups=None)),
             Q.AND
         )
 
         return base_query
+
+
+class NotificationQuerySet(RestrictedQuerySet):
+
+    def unread(self):
+        """
+        Return only unread notifications.
+        """
+        return self.filter(read__isnull=True)

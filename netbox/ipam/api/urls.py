@@ -1,53 +1,37 @@
 from django.urls import path
 
-from netbox.api import NetBoxRouter
-from ipam.models import IPRange, Prefix
+from netbox.api.routers import NetBoxRouter
 from . import views
 
 
 router = NetBoxRouter()
 router.APIRootView = views.IPAMRootView
 
-# ASNs
 router.register('asns', views.ASNViewSet)
-
-# VRFs
+router.register('asn-ranges', views.ASNRangeViewSet)
 router.register('vrfs', views.VRFViewSet)
-
-# Route targets
 router.register('route-targets', views.RouteTargetViewSet)
-
-# RIRs
 router.register('rirs', views.RIRViewSet)
-
-# Aggregates
 router.register('aggregates', views.AggregateViewSet)
-
-# Prefixes
 router.register('roles', views.RoleViewSet)
 router.register('prefixes', views.PrefixViewSet)
-
-# IP ranges
 router.register('ip-ranges', views.IPRangeViewSet)
-
-# IP addresses
 router.register('ip-addresses', views.IPAddressViewSet)
-
-# FHRP groups
 router.register('fhrp-groups', views.FHRPGroupViewSet)
 router.register('fhrp-group-assignments', views.FHRPGroupAssignmentViewSet)
-
-# VLANs
 router.register('vlan-groups', views.VLANGroupViewSet)
 router.register('vlans', views.VLANViewSet)
-
-# Services
 router.register('service-templates', views.ServiceTemplateViewSet)
 router.register('services', views.ServiceViewSet)
 
 app_name = 'ipam-api'
 
 urlpatterns = [
+    path(
+        'asn-ranges/<int:pk>/available-asns/',
+        views.AvailableASNsView.as_view(),
+        name='asnrange-available-asns'
+    ),
     path(
         'ip-ranges/<int:pk>/available-ips/',
         views.IPRangeAvailableIPAddressesView.as_view(),

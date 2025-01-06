@@ -1,51 +1,57 @@
-import graphene
+from typing import List
 
-from netbox.graphql.fields import ObjectField, ObjectListField
+import strawberry
+import strawberry_django
+
 from .types import *
 
 
-class IPAMQuery(graphene.ObjectType):
-    asn = ObjectField(ASNType)
-    asn_list = ObjectListField(ASNType)
+@strawberry.type(name="Query")
+class IPAMQuery:
+    asn: ASNType = strawberry_django.field()
+    asn_list: List[ASNType] = strawberry_django.field()
 
-    aggregate = ObjectField(AggregateType)
-    aggregate_list = ObjectListField(AggregateType)
+    asn_range: ASNRangeType = strawberry_django.field()
+    asn_range_list: List[ASNRangeType] = strawberry_django.field()
 
-    ip_address = ObjectField(IPAddressType)
-    ip_address_list = ObjectListField(IPAddressType)
+    aggregate: AggregateType = strawberry_django.field()
+    aggregate_list: List[AggregateType] = strawberry_django.field()
 
-    ip_range = ObjectField(IPRangeType)
-    ip_range_list = ObjectListField(IPRangeType)
+    ip_address: IPAddressType = strawberry_django.field()
+    ip_address_list: List[IPAddressType] = strawberry_django.field()
 
-    prefix = ObjectField(PrefixType)
-    prefix_list = ObjectListField(PrefixType)
+    ip_range: IPRangeType = strawberry_django.field()
+    ip_range_list: List[IPRangeType] = strawberry_django.field()
 
-    rir = ObjectField(RIRType)
-    rir_list = ObjectListField(RIRType)
+    prefix: PrefixType = strawberry_django.field()
+    prefix_list: List[PrefixType] = strawberry_django.field()
 
-    role = ObjectField(RoleType)
-    role_list = ObjectListField(RoleType)
+    rir: RIRType = strawberry_django.field()
+    rir_list: List[RIRType] = strawberry_django.field()
 
-    route_target = ObjectField(RouteTargetType)
-    route_target_list = ObjectListField(RouteTargetType)
+    role: RoleType = strawberry_django.field()
+    role_list: List[RoleType] = strawberry_django.field()
 
-    service = ObjectField(ServiceType)
-    service_list = ObjectListField(ServiceType)
+    route_target: RouteTargetType = strawberry_django.field()
+    route_target_list: List[RouteTargetType] = strawberry_django.field()
 
-    service_template = ObjectField(ServiceTemplateType)
-    service_template_list = ObjectListField(ServiceTemplateType)
+    service: ServiceType = strawberry_django.field()
+    service_list: List[ServiceType] = strawberry_django.field()
 
-    fhrp_group = ObjectField(FHRPGroupType)
-    fhrp_group_list = ObjectListField(FHRPGroupType)
+    service_template: ServiceTemplateType = strawberry_django.field()
+    service_template_list: List[ServiceTemplateType] = strawberry_django.field()
 
-    fhrp_group_assignment = ObjectField(FHRPGroupAssignmentType)
-    fhrp_group_assignment_list = ObjectListField(FHRPGroupAssignmentType)
+    fhrp_group: FHRPGroupType = strawberry_django.field()
+    fhrp_group_list: List[FHRPGroupType] = strawberry_django.field()
 
-    vlan = ObjectField(VLANType)
-    vlan_list = ObjectListField(VLANType)
+    fhrp_group_assignment: FHRPGroupAssignmentType = strawberry_django.field()
+    fhrp_group_assignment_list: List[FHRPGroupAssignmentType] = strawberry_django.field()
 
-    vlan_group = ObjectField(VLANGroupType)
-    vlan_group_list = ObjectListField(VLANGroupType)
+    vlan: VLANType = strawberry_django.field()
+    vlan_list: List[VLANType] = strawberry_django.field()
 
-    vrf = ObjectField(VRFType)
-    vrf_list = ObjectListField(VRFType)
+    vlan_group: VLANGroupType = strawberry_django.field()
+    vlan_group_list: List[VLANGroupType] = strawberry_django.field()
+
+    vrf: VRFType = strawberry_django.field()
+    vrf_list: List[VRFType] = strawberry_django.field()

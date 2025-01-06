@@ -1,7 +1,10 @@
+import strawberry
+import strawberry_django
 from django.contrib.contenttypes.models import ContentType
-from graphene_django import DjangoObjectType
 
-from extras.graphql.mixins import ChangelogMixin, CustomFieldsMixin, JournalEntriesMixin, TagsMixin
+from core.graphql.mixins import ChangelogMixin
+from core.models import ObjectType as ObjectType_
+from extras.graphql.mixins import CustomFieldsMixin, JournalEntriesMixin, TagsMixin
 
 __all__ = (
     'BaseObjectType',
@@ -15,17 +18,27 @@ __all__ = (
 # Base types
 #
 
-class BaseObjectType(DjangoObjectType):
+@strawberry.type
+class BaseObjectType:
     """
     Base GraphQL object type for all NetBox objects. Restricts the model queryset to enforce object permissions.
     """
-    class Meta:
-        abstract = True
 
     @classmethod
-    def get_queryset(cls, queryset, info):
+    def get_queryset(cls, queryset, info, **kwargs):
         # Enforce object permissions on the queryset
-        return queryset.restrict(info.context.user, 'view')
+        if hasattr(queryset, 'restrict'):
+            return queryset.restrict(info.context.request.user, 'view')
+        else:
+            return queryset
+
+    @strawberry_django.field
+    def display(self) -> str:
+        return str(self)
+
+    @strawberry_django.field
+    def class_type(self) -> str:
+        return self.__class__.__name__
 
 
 class ObjectType(
@@ -35,8 +48,7 @@ class ObjectType(
     """
     Base GraphQL object type for unclassified models which support change logging
     """
-    class Meta:
-        abstract = True
+    pass
 
 
 class OrganizationalObjectType(
@@ -48,8 +60,7 @@ class OrganizationalObjectType(
     """
     Base type for organizational models
     """
-    class Meta:
-        abstract = True
+    pass
 
 
 class NetBoxObjectType(
@@ -62,16 +73,24 @@ class NetBoxObjectType(
     """
     GraphQL type for most NetBox models. Includes support for custom fields, change logging, journaling, and tags.
     """
-    class Meta:
-        abstract = True
+    pass
 
 
 #
 # Miscellaneous types
 #
 
-class ContentTypeType(DjangoObjectType):
+@strawberry_django.type(
+    ContentType,
+    fields=['id', 'app_label', 'model'],
+)
+class ContentTypeType:
+    pass
 
-    class Meta:
-        model = ContentType
-        fields = ('id', 'app_label', 'model')
+
+@strawberry_django.type(
+    ObjectType_,
+    fields=['id', 'app_label', 'model'],
+)
+class ObjectTypeType:
+    pass

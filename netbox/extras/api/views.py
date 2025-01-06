@@ -1,27 +1,30 @@
-from django.contrib.contenttypes.models import ContentType
 from django.http import Http404
+from django.shortcuts import get_object_or_404
 from django_rq.queues import get_connection
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.generics import RetrieveUpdateDestroyAPIView
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.routers import APIRootView
-from rest_framework.viewsets import ReadOnlyModelViewSet, ViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from rq import Worker
 
+from core.models import ObjectType
 from extras import filtersets
-from extras.choices import JobResultStatusChoices
+from extras.jobs import ScriptJob
 from extras.models import *
-from extras.models import CustomField
-from extras.reports import get_report, get_reports, run_report
-from extras.scripts import get_script, get_scripts, run_script
 from netbox.api.authentication import IsAuthenticatedOrLoginNotRequired
+from netbox.api.features import SyncedDataMixin
 from netbox.api.metadata import ContentTypeMetadata
+from netbox.api.renderers import TextRenderer
 from netbox.api.viewsets import NetBoxModelViewSet
 from utilities.exceptions import RQWorkerNotRunningException
-from utilities.utils import copy_safe_request, count_related
+from utilities.request import copy_safe_request
 from . import serializers
+from .mixins import ConfigTemplateRenderMixin
 
 
 class ExtrasRootView(APIRootView):
@@ -32,26 +35,15 @@ class ExtrasRootView(APIRootView):
         return 'Extras'
 
 
-class ConfigContextQuerySetMixin:
-    """
-    Used by views that work with config context models (device and virtual machine).
-    Provides a get_queryset() method which deals with adding the config context
-    data annotation or not.
-    """
-    def get_queryset(self):
-        """
-        Build the proper queryset based on the request context
+#
+# EventRules
+#
 
-        If the `brief` query param equates to True or the `exclude` query param
-        includes `config_context` as a value, return the base queryset.
-
-        Else, return the queryset annotated with config context data
-        """
-        queryset = super().get_queryset()
-        request = self.get_serializer_context()['request']
-        if self.brief or 'config_context' in request.query_params.get('exclude', []):
-            return queryset
-        return queryset.annotate_config_context_data()
+class EventRuleViewSet(NetBoxModelViewSet):
+    metadata_class = ContentTypeMetadata
+    queryset = EventRule.objects.all()
+    serializer_class = serializers.EventRuleSerializer
+    filterset_class = filtersets.EventRuleFilterSet
 
 
 #
@@ -71,9 +63,38 @@ class WebhookViewSet(NetBoxModelViewSet):
 
 class CustomFieldViewSet(NetBoxModelViewSet):
     metadata_class = ContentTypeMetadata
-    queryset = CustomField.objects.all()
+    queryset = CustomField.objects.select_related('choice_set')
     serializer_class = serializers.CustomFieldSerializer
     filterset_class = filtersets.CustomFieldFilterSet
+
+
+class CustomFieldChoiceSetViewSet(NetBoxModelViewSet):
+    queryset = CustomFieldChoiceSet.objects.all()
+    serializer_class = serializers.CustomFieldChoiceSetSerializer
+    filterset_class = filtersets.CustomFieldChoiceSetFilterSet
+
+    @action(detail=True)
+    def choices(self, request, pk):
+        """
+        Provides an endpoint to iterate through each choice in a set.
+        """
+        choiceset = get_object_or_404(self.queryset, pk=pk)
+        choices = choiceset.choices
+
+        # Enable filtering
+        if q := request.GET.get('q'):
+            q = q.lower()
+            choices = [c for c in choices if q in c[0].lower() or q in c[1].lower()]
+
+        # Paginate data
+        if page := self.paginate_queryset(choices):
+            data = [
+                {'id': c[0], 'display': c[1]} for c in page
+            ]
+        else:
+            data = []
+
+        return self.get_paginated_response(data)
 
 
 #
@@ -91,7 +112,7 @@ class CustomLinkViewSet(NetBoxModelViewSet):
 # Export templates
 #
 
-class ExportTemplateViewSet(NetBoxModelViewSet):
+class ExportTemplateViewSet(SyncedDataMixin, NetBoxModelViewSet):
     metadata_class = ContentTypeMetadata
     queryset = ExportTemplate.objects.all()
     serializer_class = serializers.ExportTemplateSerializer
@@ -99,13 +120,54 @@ class ExportTemplateViewSet(NetBoxModelViewSet):
 
 
 #
+# Saved filters
+#
+
+class SavedFilterViewSet(NetBoxModelViewSet):
+    metadata_class = ContentTypeMetadata
+    queryset = SavedFilter.objects.all()
+    serializer_class = serializers.SavedFilterSerializer
+    filterset_class = filtersets.SavedFilterFilterSet
+
+
+#
+# Bookmarks
+#
+
+class BookmarkViewSet(NetBoxModelViewSet):
+    metadata_class = ContentTypeMetadata
+    queryset = Bookmark.objects.all()
+    serializer_class = serializers.BookmarkSerializer
+    filterset_class = filtersets.BookmarkFilterSet
+
+
+#
+# Notifications & subscriptions
+#
+
+class NotificationViewSet(NetBoxModelViewSet):
+    metadata_class = ContentTypeMetadata
+    queryset = Notification.objects.all()
+    serializer_class = serializers.NotificationSerializer
+
+
+class NotificationGroupViewSet(NetBoxModelViewSet):
+    queryset = NotificationGroup.objects.all()
+    serializer_class = serializers.NotificationGroupSerializer
+
+
+class SubscriptionViewSet(NetBoxModelViewSet):
+    metadata_class = ContentTypeMetadata
+    queryset = Subscription.objects.all()
+    serializer_class = serializers.SubscriptionSerializer
+
+
+#
 # Tags
 #
 
 class TagViewSet(NetBoxModelViewSet):
-    queryset = Tag.objects.annotate(
-        tagged_items=count_related(TaggedItem, 'tag')
-    )
+    queryset = Tag.objects.all()
     serializer_class = serializers.TagSerializer
     filterset_class = filtersets.TagFilterSet
 
@@ -136,195 +198,96 @@ class JournalEntryViewSet(NetBoxModelViewSet):
 # Config contexts
 #
 
-class ConfigContextViewSet(NetBoxModelViewSet):
-    queryset = ConfigContext.objects.prefetch_related(
-        'regions', 'site_groups', 'sites', 'roles', 'platforms', 'tenant_groups', 'tenants',
-    )
+class ConfigContextViewSet(SyncedDataMixin, NetBoxModelViewSet):
+    queryset = ConfigContext.objects.all()
     serializer_class = serializers.ConfigContextSerializer
     filterset_class = filtersets.ConfigContextFilterSet
 
 
 #
-# Reports
+# Config templates
 #
 
-class ReportViewSet(ViewSet):
-    permission_classes = [IsAuthenticatedOrLoginNotRequired]
-    _ignore_model_permissions = True
-    exclude_from_schema = True
-    lookup_value_regex = '[^/]+'  # Allow dots
+class ConfigTemplateViewSet(SyncedDataMixin, ConfigTemplateRenderMixin, NetBoxModelViewSet):
+    queryset = ConfigTemplate.objects.all()
+    serializer_class = serializers.ConfigTemplateSerializer
+    filterset_class = filtersets.ConfigTemplateFilterSet
 
-    def _retrieve_report(self, pk):
-
-        # Read the PK as "<module>.<report>"
-        if '.' not in pk:
-            raise Http404
-        module_name, report_name = pk.split('.', 1)
-
-        # Raise a 404 on an invalid Report module/name
-        report = get_report(module_name, report_name)
-        if report is None:
-            raise Http404
-
-        return report
-
-    def list(self, request):
+    @action(detail=True, methods=['post'], renderer_classes=[JSONRenderer, TextRenderer])
+    def render(self, request, pk):
         """
-        Compile all reports and their related results (if any). Result data is deferred in the list view.
+        Render a ConfigTemplate using the context data provided (if any). If the client requests "text/plain" data,
+        return the raw rendered content, rather than serialized JSON.
         """
-        report_list = []
-        report_content_type = ContentType.objects.get(app_label='extras', model='report')
-        results = {
-            r.name: r
-            for r in JobResult.objects.filter(
-                obj_type=report_content_type,
-                status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-            ).order_by('name', '-created').distinct('name').defer('data')
-        }
+        configtemplate = self.get_object()
+        context = request.data
 
-        # Iterate through all available Reports.
-        for module_name, reports in get_reports():
-            for report in reports:
-
-                # Attach the relevant JobResult (if any) to each Report.
-                report.result = results.get(report.full_name, None)
-                report_list.append(report)
-
-        serializer = serializers.ReportSerializer(report_list, many=True, context={
-            'request': request,
-        })
-
-        return Response(serializer.data)
-
-    def retrieve(self, request, pk):
-        """
-        Retrieve a single Report identified as "<module>.<report>".
-        """
-
-        # Retrieve the Report and JobResult, if any.
-        report = self._retrieve_report(pk)
-        report_content_type = ContentType.objects.get(app_label='extras', model='report')
-        report.result = JobResult.objects.filter(
-            obj_type=report_content_type,
-            name=report.full_name,
-            status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-        ).first()
-
-        serializer = serializers.ReportDetailSerializer(report, context={
-            'request': request
-        })
-
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['post'])
-    def run(self, request, pk):
-        """
-        Run a Report identified as "<module>.<script>" and return the pending JobResult as the result
-        """
-        # Check that the user has permission to run reports.
-        if not request.user.has_perm('extras.run_report'):
-            raise PermissionDenied("This user does not have permission to run reports.")
-
-        # Check that at least one RQ worker is running
-        if not Worker.count(get_connection('default')):
-            raise RQWorkerNotRunningException()
-
-        # Retrieve and run the Report. This will create a new JobResult.
-        report = self._retrieve_report(pk)
-        report_content_type = ContentType.objects.get(app_label='extras', model='report')
-        job_result = JobResult.enqueue_job(
-            run_report,
-            report.full_name,
-            report_content_type,
-            request.user,
-            job_timeout=report.job_timeout
-        )
-        report.result = job_result
-
-        serializer = serializers.ReportDetailSerializer(report, context={'request': request})
-
-        return Response(serializer.data)
+        return self.render_configtemplate(request, configtemplate, context)
 
 
 #
 # Scripts
 #
 
-class ScriptViewSet(ViewSet):
+@extend_schema_view(
+    update=extend_schema(request=serializers.ScriptInputSerializer),
+    partial_update=extend_schema(request=serializers.ScriptInputSerializer),
+)
+class ScriptViewSet(ModelViewSet):
     permission_classes = [IsAuthenticatedOrLoginNotRequired]
+    queryset = Script.objects.all()
+    serializer_class = serializers.ScriptSerializer
+    filterset_class = filtersets.ScriptFilterSet
+
     _ignore_model_permissions = True
-    exclude_from_schema = True
     lookup_value_regex = '[^/]+'  # Allow dots
 
     def _get_script(self, pk):
-        module_name, script_name = pk.split('.')
-        script = get_script(module_name, script_name)
-        if script is None:
+        # If pk is numeric, retrieve script by ID
+        if pk.isnumeric():
+            return get_object_or_404(self.queryset, pk=pk)
+
+        # Default to retrieval by module & name
+        try:
+            module_name, script_name = pk.split('.', maxsplit=1)
+        except ValueError:
             raise Http404
-        return script
-
-    def list(self, request):
-
-        script_content_type = ContentType.objects.get(app_label='extras', model='script')
-        results = {
-            r.name: r
-            for r in JobResult.objects.filter(
-                obj_type=script_content_type,
-                status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-            ).order_by('name', '-created').distinct('name').defer('data')
-        }
-
-        flat_list = []
-        for script_list in get_scripts().values():
-            flat_list.extend(script_list.values())
-
-        # Attach JobResult objects to each script (if any)
-        for script in flat_list:
-            script.result = results.get(script.full_name, None)
-
-        serializer = serializers.ScriptSerializer(flat_list, many=True, context={'request': request})
-
-        return Response(serializer.data)
+        return get_object_or_404(self.queryset, module__file_path=f'{module_name}.py', name=script_name)
 
     def retrieve(self, request, pk):
         script = self._get_script(pk)
-        script_content_type = ContentType.objects.get(app_label='extras', model='script')
-        script.result = JobResult.objects.filter(
-            obj_type=script_content_type,
-            name=script.full_name,
-            status__in=JobResultStatusChoices.TERMINAL_STATE_CHOICES
-        ).first()
         serializer = serializers.ScriptDetailSerializer(script, context={'request': request})
 
         return Response(serializer.data)
 
     def post(self, request, pk):
         """
-        Run a Script identified as "<module>.<script>" and return the pending JobResult as the result
+        Run a Script identified by its numeric PK or module & name and return the pending Job as the result
         """
-        script = self._get_script(pk)()
-        input_serializer = serializers.ScriptInputSerializer(data=request.data)
+        if not request.user.has_perm('extras.run_script'):
+            raise PermissionDenied("This user does not have permission to run scripts.")
+
+        script = self._get_script(pk)
+        input_serializer = serializers.ScriptInputSerializer(
+            data=request.data,
+            context={'script': script}
+        )
 
         # Check that at least one RQ worker is running
         if not Worker.count(get_connection('default')):
             raise RQWorkerNotRunningException()
 
         if input_serializer.is_valid():
-            data = input_serializer.data['data']
-            commit = input_serializer.data['commit']
-
-            script_content_type = ContentType.objects.get(app_label='extras', model='script')
-            job_result = JobResult.enqueue_job(
-                run_script,
-                script.full_name,
-                script_content_type,
-                request.user,
-                data=data,
+            ScriptJob.enqueue(
+                instance=script,
+                user=request.user,
+                data=input_serializer.data['data'],
                 request=copy_safe_request(request),
-                commit=commit,
-                job_timeout=script.job_timeout,
+                commit=input_serializer.data['commit'],
+                job_timeout=script.python_class.job_timeout,
+                schedule_at=input_serializer.validated_data.get('schedule_at'),
+                interval=input_serializer.validated_data.get('interval')
             )
-            script.result = job_result
             serializer = serializers.ScriptDetailSerializer(script, context={'request': request})
 
             return Response(serializer.data)
@@ -333,41 +296,26 @@ class ScriptViewSet(ViewSet):
 
 
 #
-# Change logging
+# Object types
 #
 
-class ObjectChangeViewSet(ReadOnlyModelViewSet):
+class ObjectTypeViewSet(ReadOnlyModelViewSet):
     """
-    Retrieve a list of recent changes.
+    Read-only list of ObjectTypes.
     """
-    metadata_class = ContentTypeMetadata
-    queryset = ObjectChange.objects.prefetch_related('user')
-    serializer_class = serializers.ObjectChangeSerializer
-    filterset_class = filtersets.ObjectChangeFilterSet
-
-
-#
-# Job Results
-#
-
-class JobResultViewSet(ReadOnlyModelViewSet):
-    """
-    Retrieve a list of job results
-    """
-    queryset = JobResult.objects.prefetch_related('user')
-    serializer_class = serializers.JobResultSerializer
-    filterset_class = filtersets.JobResultFilterSet
+    permission_classes = [IsAuthenticatedOrLoginNotRequired]
+    queryset = ObjectType.objects.order_by('app_label', 'model')
+    serializer_class = serializers.ObjectTypeSerializer
+    filterset_class = filtersets.ObjectTypeFilterSet
 
 
 #
-# ContentTypes
+# User dashboard
 #
 
-class ContentTypeViewSet(ReadOnlyModelViewSet):
-    """
-    Read-only list of ContentTypes. Limit results to ContentTypes pertinent to NetBox objects.
-    """
-    permission_classes = (IsAuthenticated,)
-    queryset = ContentType.objects.order_by('app_label', 'model')
-    serializer_class = serializers.ContentTypeSerializer
-    filterset_class = filtersets.ContentTypeFilterSet
+class DashboardView(RetrieveUpdateDestroyAPIView):
+    queryset = Dashboard.objects.all()
+    serializer_class = serializers.DashboardSerializer
+
+    def get_object(self):
+        return Dashboard.objects.filter(user=self.request.user).first()

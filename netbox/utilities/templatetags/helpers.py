@@ -1,16 +1,34 @@
-import datetime
-import decimal
+import json
 from typing import Dict, Any
+from urllib.parse import quote
 
 from django import template
-from django.conf import settings
-from django.template.defaultfilters import date
 from django.urls import NoReverseMatch, reverse
-from django.utils import timezone
-from django.utils.safestring import mark_safe
 
+from core.models import ObjectType
 from utilities.forms import get_selected_values, TableConfigForm
-from utilities.utils import get_viewname
+from utilities.views import get_viewname
+
+__all__ = (
+    'applied_filters',
+    'as_range',
+    'divide',
+    'get_item',
+    'get_key',
+    'humanize_megabytes',
+    'humanize_speed',
+    'icon_from_status',
+    'kg_to_pounds',
+    'meters_to_feet',
+    'percentage',
+    'querystring',
+    'startswith',
+    'status_from_tag',
+    'table_config_form',
+    'utilization_graph',
+    'validated_viewname',
+    'viewname',
+)
 
 register = template.Library()
 
@@ -69,58 +87,22 @@ def humanize_speed(speed):
 @register.filter()
 def humanize_megabytes(mb):
     """
-    Express a number of megabytes in the most suitable unit (e.g. gigabytes or terabytes).
+    Express a number of megabytes in the most suitable unit (e.g. gigabytes, terabytes, etc.).
     """
     if not mb:
-        return ''
-    if mb >= 1048576:
-        return f'{int(mb / 1048576)} TB'
-    if mb >= 1024:
-        return f'{int(mb / 1024)} GB'
-    return f'{mb} MB'
+        return ""
 
+    PB_SIZE = 1000000000
+    TB_SIZE = 1000000
+    GB_SIZE = 1000
 
-@register.filter()
-def simplify_decimal(value):
-    """
-    Return the simplest expression of a decimal value. Examples:
-      1.00 => '1'
-      1.20 => '1.2'
-      1.23 => '1.23'
-    """
-    if type(value) is not decimal.Decimal:
-        return value
-    return str(value).rstrip('0').rstrip('.')
-
-
-@register.filter(expects_localtime=True)
-def annotated_date(date_value):
-    """
-    Returns date as HTML span with short date format as the content and the
-    (long) date format as the title.
-    """
-    if not date_value:
-        return ''
-
-    if type(date_value) == datetime.date:
-        long_ts = date(date_value, 'DATE_FORMAT')
-        short_ts = date(date_value, 'SHORT_DATE_FORMAT')
-    else:
-        long_ts = date(date_value, 'DATETIME_FORMAT')
-        short_ts = date(date_value, 'SHORT_DATETIME_FORMAT')
-
-    span = f'<span title="{long_ts}">{short_ts}</span>'
-
-    return mark_safe(span)
-
-
-@register.simple_tag
-def annotated_now():
-    """
-    Returns the current date piped through the annotated_date filter.
-    """
-    tzinfo = timezone.get_current_timezone() if settings.USE_TZ else None
-    return annotated_date(datetime.datetime.now(tz=tzinfo))
+    if mb >= PB_SIZE:
+        return f"{mb / PB_SIZE:.2f} PB"
+    if mb >= TB_SIZE:
+        return f"{mb / TB_SIZE:.2f} TB"
+    if mb >= GB_SIZE:
+        return f"{mb / GB_SIZE:.2f} GB"
+    return f"{mb} MB"
 
 
 @register.filter()
@@ -140,23 +122,8 @@ def percentage(x, y):
     """
     if x is None or y is None:
         return None
-    return round(x / y * 100)
 
-
-@register.filter()
-def get_docs_url(model):
-    """
-    Return the documentation URL for the specified model.
-    """
-    return f'{settings.STATIC_URL}docs/models/{model._meta.app_label}/{model._meta.model_name}/'
-
-
-@register.filter()
-def has_perms(user, permissions_list):
-    """
-    Return True if the user has *all* permissions in the list.
-    """
-    return user.has_perms(permissions_list)
+    return round(x / y * 100, 1)
 
 
 @register.filter()
@@ -177,6 +144,14 @@ def meters_to_feet(n):
     Convert a length from meters to feet.
     """
     return float(n) * 3.28084
+
+
+@register.filter()
+def kg_to_pounds(n):
+    """
+    Convert a weight from kilograms to pounds.
+    """
+    return float(n) * 2.204623
 
 
 @register.filter("startswith")
@@ -217,6 +192,7 @@ def status_from_tag(tag: str = "info") -> str:
         'warning': 'warning',
         'success': 'success',
         'error': 'danger',
+        'danger': 'danger',
         'debug': 'info',
         'info': 'info',
     }
@@ -288,12 +264,13 @@ def table_config_form(table, table_name=None):
     }
 
 
-@register.inclusion_tag('helpers/applied_filters.html')
-def applied_filters(form, query_params):
+@register.inclusion_tag('helpers/applied_filters.html', takes_context=True)
+def applied_filters(context, model, form, query_params):
     """
     Display the active filters for a given filter form.
     """
-    form.is_valid()
+    user = context['request'].user
+    form.is_valid()  # Ensure cleaned_data has been set
 
     applied_filters = []
     for filter_name in form.changed_data:
@@ -302,6 +279,10 @@ def applied_filters(form, query_params):
 
         querydict = query_params.copy()
         if filter_name not in querydict:
+            continue
+
+        # Skip saved filters, as they're displayed alongside the quick search widget
+        if filter_name == 'filter_id':
             continue
 
         bound_field = form.fields[filter_name].get_bound_field(form, filter_name)
@@ -315,6 +296,14 @@ def applied_filters(form, query_params):
             'link_text': f'{bound_field.label}: {display_value}',
         })
 
+    save_link = None
+    if user.has_perm('extras.add_savedfilter') and 'filter_id' not in context['request'].GET:
+        object_type = ObjectType.objects.get_for_model(model).pk
+        parameters = json.dumps(dict(context['request'].GET.lists()))
+        url = reverse('extras:savedfilter_add')
+        save_link = f"{url}?object_types={object_type}&parameters={quote(parameters)}"
+
     return {
         'applied_filters': applied_filters,
+        'save_link': save_link,
     }

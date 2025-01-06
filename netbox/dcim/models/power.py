@@ -1,14 +1,15 @@
-from django.contrib.contenttypes.fields import GenericRelation
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 
 from dcim.choices import *
-from dcim.constants import *
-from netbox.models import NetBoxModel
+from netbox.config import ConfigItem
+from netbox.models import PrimaryModel
+from netbox.models.features import ContactsMixin, ImageAttachmentsMixin
 from utilities.validators import ExclusionValidator
-from .device_components import LinkTermination, PathEndpoint
+from .device_components import CabledObjectModel, PathEndpoint
 
 __all__ = (
     'PowerFeed',
@@ -20,7 +21,7 @@ __all__ = (
 # Power
 #
 
-class PowerPanel(NetBoxModel):
+class PowerPanel(ContactsMixin, ImageAttachmentsMixin, PrimaryModel):
     """
     A distribution point for electrical power; e.g. a data center RPP.
     """
@@ -35,20 +36,24 @@ class PowerPanel(NetBoxModel):
         null=True
     )
     name = models.CharField(
+        verbose_name=_('name'),
         max_length=100
     )
 
-    # Generic relations
-    contacts = GenericRelation(
-        to='tenancy.ContactAssignment'
-    )
-    images = GenericRelation(
-        to='extras.ImageAttachment'
+    prerequisite_models = (
+        'dcim.Site',
     )
 
     class Meta:
         ordering = ['site', 'name']
-        unique_together = ['site', 'name']
+        constraints = (
+            models.UniqueConstraint(
+                fields=('site', 'name'),
+                name='%(app_label)s_%(class)s_unique_site_name'
+            ),
+        )
+        verbose_name = _('power panel')
+        verbose_name_plural = _('power panels')
 
     def __str__(self):
         return self.name
@@ -62,11 +67,12 @@ class PowerPanel(NetBoxModel):
         # Location must belong to assigned Site
         if self.location and self.location.site != self.site:
             raise ValidationError(
-                f"Location {self.location} ({self.location.site}) is in a different site than {self.site}"
+                _("Location {location} ({location_site}) is in a different site than {site}").format(
+                    location=self.location, location_site=self.location.site, site=self.site)
             )
 
 
-class PowerFeed(NetBoxModel, PathEndpoint, LinkTermination):
+class PowerFeed(PrimaryModel, PathEndpoint, CabledObjectModel):
     """
     An electrical circuit delivered from a PowerPanel.
     """
@@ -78,61 +84,85 @@ class PowerFeed(NetBoxModel, PathEndpoint, LinkTermination):
     rack = models.ForeignKey(
         to='Rack',
         on_delete=models.PROTECT,
+        related_name='powerfeeds',
         blank=True,
         null=True
     )
     name = models.CharField(
+        verbose_name=_('name'),
         max_length=100
     )
     status = models.CharField(
+        verbose_name=_('status'),
         max_length=50,
         choices=PowerFeedStatusChoices,
         default=PowerFeedStatusChoices.STATUS_ACTIVE
     )
     type = models.CharField(
+        verbose_name=_('type'),
         max_length=50,
         choices=PowerFeedTypeChoices,
         default=PowerFeedTypeChoices.TYPE_PRIMARY
     )
     supply = models.CharField(
+        verbose_name=_('supply'),
         max_length=50,
         choices=PowerFeedSupplyChoices,
         default=PowerFeedSupplyChoices.SUPPLY_AC
     )
     phase = models.CharField(
+        verbose_name=_('phase'),
         max_length=50,
         choices=PowerFeedPhaseChoices,
         default=PowerFeedPhaseChoices.PHASE_SINGLE
     )
     voltage = models.SmallIntegerField(
-        default=POWERFEED_VOLTAGE_DEFAULT,
+        verbose_name=_('voltage'),
+        default=ConfigItem('POWERFEED_DEFAULT_VOLTAGE'),
         validators=[ExclusionValidator([0])]
     )
     amperage = models.PositiveSmallIntegerField(
+        verbose_name=_('amperage'),
         validators=[MinValueValidator(1)],
-        default=POWERFEED_AMPERAGE_DEFAULT
+        default=ConfigItem('POWERFEED_DEFAULT_AMPERAGE')
     )
     max_utilization = models.PositiveSmallIntegerField(
+        verbose_name=_('max utilization'),
         validators=[MinValueValidator(1), MaxValueValidator(100)],
-        default=POWERFEED_MAX_UTILIZATION_DEFAULT,
-        help_text="Maximum permissible draw (percentage)"
+        default=ConfigItem('POWERFEED_DEFAULT_MAX_UTILIZATION'),
+        help_text=_("Maximum permissible draw (percentage)")
     )
     available_power = models.PositiveIntegerField(
+        verbose_name=_('available power'),
         default=0,
         editable=False
     )
-    comments = models.TextField(
-        blank=True
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.PROTECT,
+        related_name='power_feeds',
+        blank=True,
+        null=True
     )
 
-    clone_fields = [
+    clone_fields = (
         'power_panel', 'rack', 'status', 'type', 'mark_connected', 'supply', 'phase', 'voltage', 'amperage',
-        'max_utilization', 'available_power',
-    ]
+        'max_utilization', 'tenant',
+    )
+    prerequisite_models = (
+        'dcim.PowerPanel',
+    )
 
     class Meta:
         ordering = ['power_panel', 'name']
-        unique_together = ['power_panel', 'name']
+        constraints = (
+            models.UniqueConstraint(
+                fields=('power_panel', 'name'),
+                name='%(app_label)s_%(class)s_unique_power_panel_name'
+            ),
+        )
+        verbose_name = _('power feed')
+        verbose_name_plural = _('power feeds')
 
     def __str__(self):
         return self.name
@@ -145,14 +175,19 @@ class PowerFeed(NetBoxModel, PathEndpoint, LinkTermination):
 
         # Rack must belong to same Site as PowerPanel
         if self.rack and self.rack.site != self.power_panel.site:
-            raise ValidationError("Rack {} ({}) and power panel {} ({}) are in different sites".format(
-                self.rack, self.rack.site, self.power_panel, self.power_panel.site
+            raise ValidationError(_(
+                "Rack {rack} ({rack_site}) and power panel {powerpanel} ({powerpanel_site}) are in different sites."
+            ).format(
+                rack=self.rack,
+                rack_site=self.rack.site,
+                powerpanel=self.power_panel,
+                powerpanel_site=self.power_panel.site
             ))
 
         # AC voltage cannot be negative
         if self.voltage < 0 and self.supply == PowerFeedSupplyChoices.SUPPLY_AC:
             raise ValidationError({
-                "voltage": "Voltage cannot be negative for AC supply"
+                "voltage": _("Voltage cannot be negative for AC supply")
             })
 
     def save(self, *args, **kwargs):

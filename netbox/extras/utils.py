@@ -1,9 +1,18 @@
-from django.db.models import Q
-from django.utils.deconstruct import deconstructible
+import importlib
+
+from django.core.exceptions import ImproperlyConfigured
 from taggit.managers import _TaggableManager
 
-from extras.constants import EXTRAS_FEATURES
-from extras.registry import registry
+from netbox.context import current_request
+from .validators import CustomValidator
+
+__all__ = (
+    'image_upload',
+    'is_report',
+    'is_script',
+    'is_taggable',
+    'run_validators',
+)
 
 
 def is_taggable(obj):
@@ -18,46 +27,60 @@ def is_taggable(obj):
 
 def image_upload(instance, filename):
     """
-    Return a path for uploading image attchments.
+    Return a path for uploading image attachments.
     """
     path = 'image-attachments/'
 
     # Rename the file to the provided name, if any. Attempt to preserve the file extension.
     extension = filename.rsplit('.')[-1].lower()
-    if instance.name and extension in ['bmp', 'gif', 'jpeg', 'jpg', 'png']:
+    if instance.name and extension in ['bmp', 'gif', 'jpeg', 'jpg', 'png', 'webp']:
         filename = '.'.join([instance.name, extension])
     elif instance.name:
         filename = instance.name
 
-    return '{}{}_{}_{}'.format(path, instance.content_type.name, instance.object_id, filename)
+    return '{}{}_{}_{}'.format(path, instance.object_type.name, instance.object_id, filename)
 
 
-@deconstructible
-class FeatureQuery:
+def is_script(obj):
     """
-    Helper class that delays evaluation of the registry contents for the functionality store
-    until it has been populated.
+    Returns True if the object is a Script or Report.
     """
-    def __init__(self, feature):
-        self.feature = feature
-
-    def __call__(self):
-        return self.get_query()
-
-    def get_query(self):
-        """
-        Given an extras feature, return a Q object for content type lookup
-        """
-        query = Q()
-        for app_label, models in registry['model_features'][self.feature].items():
-            query |= Q(app_label=app_label, model__in=models)
-
-        return query
+    from .reports import Report
+    from .scripts import Script
+    try:
+        return (issubclass(obj, Report) and obj != Report) or (issubclass(obj, Script) and obj != Script)
+    except TypeError:
+        return False
 
 
-def register_features(model, features):
-    for feature in features:
-        if feature not in EXTRAS_FEATURES:
-            raise ValueError(f"{feature} is not a valid extras feature!")
-        app_label, model_name = model._meta.label_lower.split('.')
-        registry['model_features'][feature][app_label].add(model_name)
+def is_report(obj):
+    """
+    Returns True if the given object is a Report.
+    """
+    from .reports import Report
+    try:
+        return issubclass(obj, Report) and obj != Report
+    except TypeError:
+        return False
+
+
+def run_validators(instance, validators):
+    """
+    Run the provided iterable of CustomValidators for the instance.
+    """
+    request = current_request.get()
+    for validator in validators:
+
+        # Loading a validator class by dotted path
+        if type(validator) is str:
+            module, cls = validator.rsplit('.', 1)
+            validator = getattr(importlib.import_module(module), cls)()
+
+        # Constructing a new instance on the fly from a ruleset
+        elif type(validator) is dict:
+            validator = CustomValidator(validator)
+
+        elif not issubclass(validator.__class__, CustomValidator):
+            raise ImproperlyConfigured(f"Invalid value for custom validator: {validator}")
+
+        validator(instance, request)

@@ -1,11 +1,12 @@
 import django_tables2 as tables
 from django.utils.safestring import mark_safe
+from django.utils.translation import gettext_lazy as _
 from django_tables2.utils import Accessor
 
 from dcim.models import Interface
 from ipam.models import *
 from netbox.tables import NetBoxTable, columns
-from tenancy.tables import TenantColumn
+from tenancy.tables import TenancyColumnsMixin, TenantColumn
 from virtualization.models import VMInterface
 
 __all__ = (
@@ -17,7 +18,7 @@ __all__ = (
     'VLANVirtualMachinesTable',
 )
 
-AVAILABLE_LABEL = mark_safe('<span class="badge bg-success">Available</span>')
+AVAILABLE_LABEL = mark_safe('<span class="badge text-bg-success">Available</span>')
 
 VLAN_LINK = """
 {% if record.pk %}
@@ -30,7 +31,7 @@ VLAN_LINK = """
 """
 
 VLAN_PREFIXES = """
-{% for prefix in record.prefixes.all %}
+{% for prefix in value.all %}
     <a href="{% url 'ipam:prefix' pk=prefix.pk %}">{{ prefix }}</a>{% if not forloop.last %}<br />{% endif %}
 {% endfor %}
 """
@@ -59,16 +60,30 @@ VLAN_MEMBER_TAGGED = """
 #
 
 class VLANGroupTable(NetBoxTable):
-    name = tables.Column(linkify=True)
-    scope_type = columns.ContentTypeColumn()
+    name = tables.Column(
+        verbose_name=_('Name'),
+        linkify=True
+    )
+    scope_type = columns.ContentTypeColumn(
+        verbose_name=_('Scope Type'),
+    )
     scope = tables.Column(
+        verbose_name=_('Scope'),
         linkify=True,
+        orderable=False
+    )
+    vid_ranges_list = tables.Column(
+        verbose_name=_('VID Ranges'),
         orderable=False
     )
     vlan_count = columns.LinkedCountColumn(
         viewname='ipam:vlan_list',
         url_params={'group_id': 'pk'},
-        verbose_name='VLANs'
+        verbose_name=_('VLANs')
+    )
+    utilization = columns.UtilizationColumn(
+        orderable=False,
+        verbose_name=_('Utilization')
     )
     tags = columns.TagColumn(
         url_name='ipam:vlangroup_list'
@@ -80,41 +95,54 @@ class VLANGroupTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = VLANGroup
         fields = (
-            'pk', 'id', 'name', 'scope_type', 'scope', 'min_vid', 'max_vid', 'vlan_count', 'slug', 'description',
-            'tags', 'created', 'last_updated', 'actions',
+            'pk', 'id', 'name', 'scope_type', 'scope', 'vid_ranges_list', 'vlan_count', 'slug', 'description',
+            'tags', 'created', 'last_updated', 'actions', 'utilization',
         )
-        default_columns = ('pk', 'name', 'scope_type', 'scope', 'vlan_count', 'description')
+        default_columns = ('pk', 'name', 'scope_type', 'scope', 'vlan_count', 'utilization', 'description')
 
 
 #
 # VLANs
 #
 
-class VLANTable(NetBoxTable):
+class VLANTable(TenancyColumnsMixin, NetBoxTable):
     vid = tables.TemplateColumn(
         template_code=VLAN_LINK,
-        verbose_name='VID'
+        verbose_name=_('VID')
     )
     name = tables.Column(
+        verbose_name=_('Name'),
         linkify=True
     )
     site = tables.Column(
+        verbose_name=_('Site'),
         linkify=True
     )
     group = tables.Column(
+        verbose_name=_('Group'),
         linkify=True
     )
-    tenant = TenantColumn()
     status = columns.ChoiceFieldColumn(
+        verbose_name=_('Status'),
         default=AVAILABLE_LABEL
     )
     role = tables.Column(
+        verbose_name=_('Role'),
         linkify=True
+    )
+    l2vpn = tables.Column(
+        accessor=tables.A('l2vpn_termination__l2vpn'),
+        linkify=True,
+        orderable=False,
+        verbose_name=_('L2VPN')
     )
     prefixes = columns.TemplateColumn(
         template_code=VLAN_PREFIXES,
         orderable=False,
-        verbose_name='Prefixes'
+        verbose_name=_('Prefixes')
+    )
+    comments = columns.MarkdownColumn(
+        verbose_name=_('Comments'),
     )
     tags = columns.TagColumn(
         url_name='ipam:vlan_list'
@@ -123,8 +151,8 @@ class VLANTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = VLAN
         fields = (
-            'pk', 'id', 'vid', 'name', 'site', 'group', 'prefixes', 'tenant', 'status', 'role', 'description', 'tags',
-            'created', 'last_updated',
+            'pk', 'id', 'vid', 'name', 'site', 'group', 'prefixes', 'tenant', 'tenant_group', 'status', 'role',
+            'description', 'comments', 'tags', 'l2vpn', 'created', 'last_updated',
         )
         default_columns = ('pk', 'vid', 'name', 'site', 'group', 'prefixes', 'tenant', 'status', 'role', 'description')
         row_attrs = {
@@ -138,9 +166,10 @@ class VLANMembersTable(NetBoxTable):
     """
     name = tables.Column(
         linkify=True,
-        verbose_name='Interface'
+        verbose_name=_('Interface')
     )
     tagged = tables.TemplateColumn(
+        verbose_name=_('Tagged'),
         template_code=VLAN_MEMBER_TAGGED,
         orderable=False
     )
@@ -148,6 +177,7 @@ class VLANMembersTable(NetBoxTable):
 
 class VLANDevicesTable(VLANMembersTable):
     device = tables.Column(
+        verbose_name=_('Device'),
         linkify=True
     )
     actions = columns.ActionsColumn(
@@ -162,6 +192,7 @@ class VLANDevicesTable(VLANMembersTable):
 
 class VLANVirtualMachinesTable(VLANMembersTable):
     virtual_machine = tables.Column(
+        verbose_name=_('Virtual Machine'),
         linkify=True
     )
     actions = columns.ActionsColumn(
@@ -180,19 +211,28 @@ class InterfaceVLANTable(NetBoxTable):
     """
     vid = tables.Column(
         linkify=True,
-        verbose_name='ID'
+        verbose_name=_('VID')
     )
-    tagged = columns.BooleanColumn()
+    tagged = columns.BooleanColumn(
+        verbose_name=_('Tagged'),
+        false_mark=None
+    )
     site = tables.Column(
+        verbose_name=_('Site'),
         linkify=True
     )
     group = tables.Column(
         accessor=Accessor('group__name'),
-        verbose_name='Group'
+        verbose_name=_('Group')
     )
-    tenant = TenantColumn()
-    status = columns.ChoiceFieldColumn()
+    tenant = TenantColumn(
+        verbose_name=_('Tenant'),
+    )
+    status = columns.ChoiceFieldColumn(
+        verbose_name=_('Status'),
+    )
     role = tables.Column(
+        verbose_name=_('Role'),
         linkify=True
     )
 

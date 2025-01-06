@@ -8,6 +8,7 @@ from dcim.models import Device, DeviceRole, DeviceType, Interface, Manufacturer,
 from ipam.choices import *
 from ipam.models import *
 from tenancy.models import Tenant
+from utilities.data import string_to_ranges
 from utilities.testing import APITestCase, APIViewTestCases, create_test_device, disable_warnings
 
 
@@ -21,34 +22,150 @@ class AppTest(APITestCase):
         self.assertEqual(response.status_code, 200)
 
 
-class ASNTest(APIViewTestCases.APIViewTestCase):
-    model = ASN
-    brief_fields = ['asn', 'display', 'id', 'url']
+class ASNRangeTest(APIViewTestCases.APIViewTestCase):
+    model = ASNRange
+    brief_fields = ['description', 'display', 'id', 'name', 'url']
     bulk_update_data = {
         'description': 'New description',
     }
 
     @classmethod
     def setUpTestData(cls):
+        rirs = (
+            RIR(name='RIR 1', slug='rir-1', is_private=True),
+            RIR(name='RIR 2', slug='rir-2', is_private=True),
+        )
+        RIR.objects.bulk_create(rirs)
 
-        rirs = [
-            RIR.objects.create(name='RFC 6996', slug='rfc-6996', description='Private Use', is_private=True),
-            RIR.objects.create(name='RFC 7300', slug='rfc-7300', description='IANA Use', is_private=True),
+        tenants = (
+            Tenant(name='Tenant 1', slug='tenant-1'),
+            Tenant(name='Tenant 2', slug='tenant-2'),
+        )
+        Tenant.objects.bulk_create(tenants)
+
+        asn_ranges = (
+            ASNRange(name='ASN Range 1', slug='asn-range-1', rir=rirs[0], tenant=tenants[0], start=100, end=199),
+            ASNRange(name='ASN Range 2', slug='asn-range-2', rir=rirs[0], tenant=tenants[0], start=200, end=299),
+            ASNRange(name='ASN Range 3', slug='asn-range-3', rir=rirs[0], tenant=tenants[0], start=300, end=399),
+        )
+        ASNRange.objects.bulk_create(asn_ranges)
+
+        cls.create_data = [
+            {
+                'name': 'ASN Range 4',
+                'slug': 'asn-range-4',
+                'rir': rirs[1].pk,
+                'start': 400,
+                'end': 499,
+                'tenant': tenants[1].pk,
+            },
+            {
+                'name': 'ASN Range 5',
+                'slug': 'asn-range-5',
+                'rir': rirs[1].pk,
+                'start': 500,
+                'end': 599,
+                'tenant': tenants[1].pk,
+            },
+            {
+                'name': 'ASN Range 6',
+                'slug': 'asn-range-6',
+                'rir': rirs[1].pk,
+                'start': 600,
+                'end': 699,
+                'tenant': tenants[1].pk,
+            },
         ]
-        sites = [
-            Site.objects.create(name='Site 1', slug='site-1'),
-            Site.objects.create(name='Site 2', slug='site-2')
+
+    def test_list_available_asns(self):
+        """
+        Test retrieval of all available ASNs within a parent range.
+        """
+        rir = RIR.objects.first()
+        asnrange = ASNRange.objects.create(name='Range 1', slug='range-1', rir=rir, start=101, end=110)
+        url = reverse('ipam-api:asnrange-available-asns', kwargs={'pk': asnrange.pk})
+        self.add_permissions('ipam.view_asnrange', 'ipam.view_asn')
+
+        response = self.client.get(url, **self.header)
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 10)
+
+    def test_create_single_available_asn(self):
+        """
+        Test creation of the first available ASN within a range.
+        """
+        rir = RIR.objects.first()
+        asnrange = ASNRange.objects.create(name='Range 1', slug='range-1', rir=rir, start=101, end=110)
+        url = reverse('ipam-api:asnrange-available-asns', kwargs={'pk': asnrange.pk})
+        self.add_permissions('ipam.view_asnrange', 'ipam.add_asn')
+
+        data = {
+            'description': 'New ASN'
+        }
+        response = self.client.post(url, data, format='json', **self.header)
+        self.assertHttpStatus(response, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['rir']['id'], asnrange.rir.pk)
+        self.assertEqual(response.data['description'], data['description'])
+
+    def test_create_multiple_available_asns(self):
+        """
+        Test the creation of several available ASNs within a parent range.
+        """
+        rir = RIR.objects.first()
+        asnrange = ASNRange.objects.create(name='Range 1', slug='range-1', rir=rir, start=101, end=110)
+        url = reverse('ipam-api:asnrange-available-asns', kwargs={'pk': asnrange.pk})
+        self.add_permissions('ipam.view_asnrange', 'ipam.add_asn')
+
+        # Try to create eleven ASNs (only ten are available)
+        data = [
+            {'description': f'New ASN {i}'}
+            for i in range(1, 12)
         ]
-        tenants = [
-            Tenant.objects.create(name='Tenant 1', slug='tenant-1'),
-            Tenant.objects.create(name='Tenant 2', slug='tenant-2'),
-        ]
+        assert len(data) == 11
+        response = self.client.post(url, data, format='json', **self.header)
+        self.assertHttpStatus(response, status.HTTP_409_CONFLICT)
+        self.assertIn('detail', response.data)
+
+        # Create all ten available ASNs in a single request
+        data.pop()
+        assert len(data) == 10
+        response = self.client.post(url, data, format='json', **self.header)
+        self.assertHttpStatus(response, status.HTTP_201_CREATED)
+        self.assertEqual(len(response.data), 10)
+
+
+class ASNTest(APIViewTestCases.APIViewTestCase):
+    model = ASN
+    brief_fields = ['asn', 'description', 'display', 'id', 'url']
+    bulk_update_data = {
+        'description': 'New description',
+    }
+
+    @classmethod
+    def setUpTestData(cls):
+        rirs = (
+            RIR(name='RIR 1', slug='rir-1', is_private=True),
+            RIR(name='RIR 2', slug='rir-2', is_private=True),
+        )
+        RIR.objects.bulk_create(rirs)
+
+        sites = (
+            Site(name='Site 1', slug='site-1'),
+            Site(name='Site 2', slug='site-2')
+        )
+        Site.objects.bulk_create(sites)
+
+        tenants = (
+            Tenant(name='Tenant 1', slug='tenant-1'),
+            Tenant(name='Tenant 2', slug='tenant-2'),
+        )
+        Tenant.objects.bulk_create(tenants)
 
         asns = (
-            ASN(asn=64513, rir=rirs[0], tenant=tenants[0]),
-            ASN(asn=65534, rir=rirs[0], tenant=tenants[1]),
-            ASN(asn=4200000000, rir=rirs[0], tenant=tenants[0]),
-            ASN(asn=4200002301, rir=rirs[1], tenant=tenants[1]),
+            ASN(asn=65000, rir=rirs[0], tenant=tenants[0]),
+            ASN(asn=65001, rir=rirs[0], tenant=tenants[1]),
+            ASN(asn=4200000000, rir=rirs[1], tenant=tenants[0]),
+            ASN(asn=4200000001, rir=rirs[1], tenant=tenants[1]),
         )
         ASN.objects.bulk_create(asns)
 
@@ -63,19 +180,19 @@ class ASNTest(APIViewTestCases.APIViewTestCase):
                 'rir': rirs[0].pk,
             },
             {
-                'asn': 65543,
+                'asn': 65002,
                 'rir': rirs[0].pk,
             },
             {
-                'asn': 4294967294,
-                'rir': rirs[0].pk,
+                'asn': 4200000002,
+                'rir': rirs[1].pk,
             },
         ]
 
 
 class VRFTest(APIViewTestCases.APIViewTestCase):
     model = VRF
-    brief_fields = ['display', 'id', 'name', 'prefix_count', 'rd', 'url']
+    brief_fields = ['description', 'display', 'id', 'name', 'prefix_count', 'rd', 'url']
     create_data = [
         {
             'name': 'VRF 4',
@@ -107,7 +224,7 @@ class VRFTest(APIViewTestCases.APIViewTestCase):
 
 class RouteTargetTest(APIViewTestCases.APIViewTestCase):
     model = RouteTarget
-    brief_fields = ['display', 'id', 'name', 'url']
+    brief_fields = ['description', 'display', 'id', 'name', 'url']
     create_data = [
         {
             'name': '65000:1004',
@@ -136,7 +253,7 @@ class RouteTargetTest(APIViewTestCases.APIViewTestCase):
 
 class RIRTest(APIViewTestCases.APIViewTestCase):
     model = RIR
-    brief_fields = ['aggregate_count', 'display', 'id', 'name', 'slug', 'url']
+    brief_fields = ['aggregate_count', 'description', 'display', 'id', 'name', 'slug', 'url']
     create_data = [
         {
             'name': 'RIR 4',
@@ -168,7 +285,7 @@ class RIRTest(APIViewTestCases.APIViewTestCase):
 
 class AggregateTest(APIViewTestCases.APIViewTestCase):
     model = Aggregate
-    brief_fields = ['display', 'family', 'id', 'prefix', 'url']
+    brief_fields = ['description', 'display', 'family', 'id', 'prefix', 'url']
     bulk_update_data = {
         'description': 'New description',
     }
@@ -207,7 +324,7 @@ class AggregateTest(APIViewTestCases.APIViewTestCase):
 
 class RoleTest(APIViewTestCases.APIViewTestCase):
     model = Role
-    brief_fields = ['display', 'id', 'name', 'prefix_count', 'slug', 'url', 'vlan_count']
+    brief_fields = ['description', 'display', 'id', 'name', 'prefix_count', 'slug', 'url', 'vlan_count']
     create_data = [
         {
             'name': 'Role 4',
@@ -239,7 +356,7 @@ class RoleTest(APIViewTestCases.APIViewTestCase):
 
 class PrefixTest(APIViewTestCases.APIViewTestCase):
     model = Prefix
-    brief_fields = ['_depth', 'display', 'family', 'id', 'prefix', 'url']
+    brief_fields = ['_depth', 'description', 'display', 'family', 'id', 'prefix', 'url']
     create_data = [
         {
             'prefix': '192.168.4.0/24',
@@ -390,7 +507,7 @@ class PrefixTest(APIViewTestCases.APIViewTestCase):
             self.assertEqual(response.data['description'], data['description'])
 
         # Try to create one more IP
-        response = self.client.post(url, {}, **self.header)
+        response = self.client.post(url, {}, format='json', **self.header)
         self.assertHttpStatus(response, status.HTTP_409_CONFLICT)
         self.assertIn('detail', response.data)
 
@@ -418,7 +535,7 @@ class PrefixTest(APIViewTestCases.APIViewTestCase):
 
 class IPRangeTest(APIViewTestCases.APIViewTestCase):
     model = IPRange
-    brief_fields = ['display', 'end_address', 'family', 'id', 'start_address', 'url']
+    brief_fields = ['description', 'display', 'end_address', 'family', 'id', 'start_address', 'url']
     create_data = [
         {
             'start_address': '192.168.4.10/24',
@@ -487,7 +604,7 @@ class IPRangeTest(APIViewTestCases.APIViewTestCase):
             self.assertEqual(response.data['description'], data['description'])
 
         # Try to create one more IP
-        response = self.client.post(url, {}, **self.header)
+        response = self.client.post(url, {}, format='json', **self.header)
         self.assertHttpStatus(response, status.HTTP_409_CONFLICT)
         self.assertIn('detail', response.data)
 
@@ -517,7 +634,7 @@ class IPRangeTest(APIViewTestCases.APIViewTestCase):
 
 class IPAddressTest(APIViewTestCases.APIViewTestCase):
     model = IPAddress
-    brief_fields = ['address', 'display', 'family', 'id', 'url']
+    brief_fields = ['address', 'description', 'display', 'family', 'id', 'url']
     create_data = [
         {
             'address': '192.168.0.4/24',
@@ -532,6 +649,9 @@ class IPAddressTest(APIViewTestCases.APIViewTestCase):
     bulk_update_data = {
         'description': 'New description',
     }
+    graphql_filter = {
+        'address': {'lookup': 'i_exact', 'value': '192.168.0.1/24'},
+    }
 
     @classmethod
     def setUpTestData(cls):
@@ -543,15 +663,70 @@ class IPAddressTest(APIViewTestCases.APIViewTestCase):
         )
         IPAddress.objects.bulk_create(ip_addresses)
 
+    def test_assign_object(self):
+        """
+        Test the creation of available IP addresses within a parent IP range.
+        """
+        site = Site.objects.create(name='Site 1')
+        manufacturer = Manufacturer.objects.create(name='Manufacturer 1')
+        device_type = DeviceType.objects.create(model='Device Type 1', manufacturer=manufacturer)
+        role = DeviceRole.objects.create(name='Switch')
+        device1 = Device.objects.create(
+            name='Device 1',
+            site=site,
+            device_type=device_type,
+            role=role,
+            status='active'
+        )
+        interface1 = Interface.objects.create(name='Interface 1', device=device1, type='1000baset')
+        interface2 = Interface.objects.create(name='Interface 2', device=device1, type='1000baset')
+        device2 = Device.objects.create(
+            name='Device 2',
+            site=site,
+            device_type=device_type,
+            role=role,
+            status='active'
+        )
+        interface3 = Interface.objects.create(name='Interface 3', device=device2, type='1000baset')
+
+        ip_addresses = (
+            IPAddress(address=IPNetwork('192.168.0.4/24'), assigned_object=interface1),
+            IPAddress(address=IPNetwork('192.168.1.4/24')),
+        )
+        IPAddress.objects.bulk_create(ip_addresses)
+
+        ip1 = ip_addresses[0]
+        ip1.assigned_object = interface1
+        device1.primary_ip4 = ip_addresses[0]
+        device1.save()
+
+        url = reverse('ipam-api:ipaddress-detail', kwargs={'pk': ip1.pk})
+        self.add_permissions('ipam.change_ipaddress')
+
+        # assign to same parent
+        data = {
+            'assigned_object_id': interface2.pk
+        }
+        response = self.client.patch(url, data, format='json', **self.header)
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+
+        # assign to same different parent - should error
+        data = {
+            'assigned_object_id': interface3.pk
+        }
+        response = self.client.patch(url, data, format='json', **self.header)
+        self.assertHttpStatus(response, status.HTTP_400_BAD_REQUEST)
+
 
 class FHRPGroupTest(APIViewTestCases.APIViewTestCase):
     model = FHRPGroup
-    brief_fields = ['display', 'group_id', 'id', 'protocol', 'url']
+    brief_fields = ['description', 'display', 'group_id', 'id', 'protocol', 'url']
     bulk_update_data = {
         'protocol': FHRPGroupProtocolChoices.PROTOCOL_GLBP,
         'group_id': 200,
         'auth_type': FHRPGroupAuthTypeChoices.AUTHENTICATION_MD5,
         'auth_key': 'foobarbaz999',
+        'name': 'foobar-999',
         'description': 'New description',
     }
 
@@ -587,10 +762,11 @@ class FHRPGroupTest(APIViewTestCases.APIViewTestCase):
 
 class FHRPGroupAssignmentTest(APIViewTestCases.APIViewTestCase):
     model = FHRPGroupAssignment
-    brief_fields = ['display', 'group_id', 'id', 'interface_id', 'interface_type', 'priority', 'url']
+    brief_fields = ['display', 'group', 'id', 'interface_id', 'interface_type', 'priority', 'url']
     bulk_update_data = {
         'priority': 100,
     }
+    user_permissions = ('ipam.view_fhrpgroup', )
 
     @classmethod
     def setUpTestData(cls):
@@ -666,7 +842,7 @@ class FHRPGroupAssignmentTest(APIViewTestCases.APIViewTestCase):
 
 class VLANGroupTest(APIViewTestCases.APIViewTestCase):
     model = VLANGroup
-    brief_fields = ['display', 'id', 'name', 'slug', 'url', 'vlan_count']
+    brief_fields = ['description', 'display', 'id', 'name', 'slug', 'url', 'vlan_count']
     create_data = [
         {
             'name': 'VLAN Group 4',
@@ -699,9 +875,17 @@ class VLANGroupTest(APIViewTestCases.APIViewTestCase):
         """
         Test retrieval of all available VLANs within a group.
         """
-        self.add_permissions('ipam.view_vlangroup', 'ipam.view_vlan')
-        vlangroup = VLANGroup.objects.first()
+        MIN_VID = 100
+        MAX_VID = 199
 
+        self.add_permissions('ipam.view_vlangroup', 'ipam.view_vlan')
+        vlangroup = VLANGroup.objects.create(
+            name='VLAN Group X',
+            slug='vlan-group-x',
+            vid_ranges=string_to_ranges(f"{MIN_VID}-{MAX_VID}")
+        )
+
+        # Create a set of VLANs within the group
         vlans = (
             VLAN(vid=10, name='VLAN 10', group=vlangroup),
             VLAN(vid=20, name='VLAN 20', group=vlangroup),
@@ -711,12 +895,16 @@ class VLANGroupTest(APIViewTestCases.APIViewTestCase):
 
         # Retrieve all available VLANs
         url = reverse('ipam-api:vlangroup-available-vlans', kwargs={'pk': vlangroup.pk})
-        response = self.client.get(url, **self.header)
-
-        self.assertEqual(len(response.data), 4094 - len(vlans))
+        response = self.client.get(f'{url}?limit=0', **self.header)
+        self.assertEqual(len(response.data), MAX_VID - MIN_VID + 1)
         available_vlans = {vlan['vid'] for vlan in response.data}
         for vlan in vlans:
             self.assertNotIn(vlan.vid, available_vlans)
+
+        # Retrieve a maximum number of available VLANs
+        url = reverse('ipam-api:vlangroup-available-vlans', kwargs={'pk': vlangroup.pk})
+        response = self.client.get(f'{url}?limit=10', **self.header)
+        self.assertEqual(len(response.data), 10)
 
     def test_create_single_available_vlan(self):
         """
@@ -774,7 +962,7 @@ class VLANGroupTest(APIViewTestCases.APIViewTestCase):
 
 class VLANTest(APIViewTestCases.APIViewTestCase):
     model = VLAN
-    brief_fields = ['display', 'id', 'name', 'url', 'vid']
+    brief_fields = ['description', 'display', 'id', 'name', 'url', 'vid']
     bulk_update_data = {
         'description': 'New description',
     }
@@ -822,7 +1010,7 @@ class VLANTest(APIViewTestCases.APIViewTestCase):
 
         self.add_permissions('ipam.delete_vlan')
         url = reverse('ipam-api:vlan-detail', kwargs={'pk': vlan.pk})
-        with disable_warnings('django.request'):
+        with disable_warnings('netbox.api.views.ModelViewSet'):
             response = self.client.delete(url, **self.header)
 
         self.assertHttpStatus(response, status.HTTP_409_CONFLICT)
@@ -834,7 +1022,7 @@ class VLANTest(APIViewTestCases.APIViewTestCase):
 
 class ServiceTemplateTest(APIViewTestCases.APIViewTestCase):
     model = ServiceTemplate
-    brief_fields = ['display', 'id', 'name', 'ports', 'protocol', 'url']
+    brief_fields = ['description', 'display', 'id', 'name', 'ports', 'protocol', 'url']
     bulk_update_data = {
         'description': 'New description',
     }
@@ -869,7 +1057,7 @@ class ServiceTemplateTest(APIViewTestCases.APIViewTestCase):
 
 class ServiceTest(APIViewTestCases.APIViewTestCase):
     model = Service
-    brief_fields = ['display', 'id', 'name', 'ports', 'protocol', 'url']
+    brief_fields = ['description', 'display', 'id', 'name', 'ports', 'protocol', 'url']
     bulk_update_data = {
         'description': 'New description',
     }
@@ -879,11 +1067,11 @@ class ServiceTest(APIViewTestCases.APIViewTestCase):
         site = Site.objects.create(name='Site 1', slug='site-1')
         manufacturer = Manufacturer.objects.create(name='Manufacturer 1', slug='manufacturer-1')
         devicetype = DeviceType.objects.create(manufacturer=manufacturer, model='Device Type 1')
-        devicerole = DeviceRole.objects.create(name='Device Role 1', slug='device-role-1')
+        role = DeviceRole.objects.create(name='Device Role 1', slug='device-role-1')
 
         devices = (
-            Device(name='Device 1', site=site, device_type=devicetype, device_role=devicerole),
-            Device(name='Device 2', site=site, device_type=devicetype, device_role=devicerole),
+            Device(name='Device 1', site=site, device_type=devicetype, role=role),
+            Device(name='Device 2', site=site, device_type=devicetype, role=role),
         )
         Device.objects.bulk_create(devices)
 

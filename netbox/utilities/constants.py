@@ -20,7 +20,8 @@ FILTER_NUMERIC_BASED_LOOKUP_MAP = dict(
     lte='lte',
     lt='lt',
     gte='gte',
-    gt='gt'
+    gt='gt',
+    empty='isnull',
 )
 
 FILTER_NEGATION_LOOKUP_MAP = dict(
@@ -30,20 +31,6 @@ FILTER_NEGATION_LOOKUP_MAP = dict(
 FILTER_TREENODE_NEGATION_LOOKUP_MAP = dict(
     n='in'
 )
-
-
-# Keys for PostgreSQL advisory locks. These are arbitrary bigints used by
-# the advisory_lock contextmanager. When a lock is acquired,
-# one of these keys will be used to identify said lock.
-#
-# When adding a new key, pick something arbitrary and unique so
-# that it is easily searchable in query logs.
-
-ADVISORY_LOCK_KEYS = {
-    'available-prefixes': 100100,
-    'available-ips': 100200,
-    'available-vlans': 100300,
-}
 
 #
 # HTTP Request META safe copy
@@ -59,6 +46,10 @@ HTTP_REQUEST_META_SAFE_COPY = [
     'HTTP_REFERER',
     'HTTP_USER_AGENT',
     'HTTP_X_FORWARDED_FOR',
+    'HTTP_X_FORWARDED_HOST',
+    'HTTP_X_FORWARDED_PORT',
+    'HTTP_X_FORWARDED_PROTO',
+    'HTTP_X_REAL_IP',
     'QUERY_STRING',
     'REMOTE_ADDR',
     'REMOTE_HOST',
@@ -67,3 +58,42 @@ HTTP_REQUEST_META_SAFE_COPY = [
     'SERVER_NAME',
     'SERVER_PORT',
 ]
+
+
+#
+# CSV-style format delimiters
+#
+
+CSV_DELIMITERS = {
+    'comma': ',',
+    'semicolon': ';',
+    'tab': '\t',
+}
+
+
+#
+# HTML allowed tags & attributes
+#
+
+HTML_ALLOWED_TAGS = {
+    "a", "b", "blockquote", "br", "code", "dd", "del", "div", "dl", "dt", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+    "hr", "i", "img", "li", "ol", "p", "pre", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul"
+}
+
+HTML_ALLOWED_ATTRIBUTES = {
+    "a": {"href", "title"},
+    "div": {"class"},
+    "h1": {"id"},
+    "h2": {"id"},
+    "h3": {"id"},
+    "h4": {"id"},
+    "h5": {"id"},
+    "h6": {"id"},
+    "img": {"alt", "src", "title"},
+    "td": {"align"},
+    "th": {"align"},
+}
+
+HTTP_PROXY_SUPPORTED_SOCK_SCHEMAS = ['socks4', 'socks4a', 'socks4h', 'socks5', 'socks5a', 'socks5h']
+HTTP_PROXY_SOCK_RDNS_SCHEMAS = ['socks4h', 'socks4a', 'socks5h', 'socks5a']
+HTTP_PROXY_SUPPORTED_SCHEMAS = ['http', 'https', 'socks4', 'socks4a', 'socks4h', 'socks5', 'socks5a', 'socks5h']

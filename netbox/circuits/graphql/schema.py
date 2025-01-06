@@ -1,21 +1,33 @@
-import graphene
+from typing import List
 
-from netbox.graphql.fields import ObjectField, ObjectListField
+import strawberry
+import strawberry_django
+
 from .types import *
 
 
-class CircuitsQuery(graphene.ObjectType):
-    circuit = ObjectField(CircuitType)
-    circuit_list = ObjectListField(CircuitType)
+@strawberry.type(name="Query")
+class CircuitsQuery:
+    circuit: CircuitType = strawberry_django.field()
+    circuit_list: List[CircuitType] = strawberry_django.field()
 
-    circuit_termination = ObjectField(CircuitTerminationType)
-    circuit_termination_list = ObjectListField(CircuitTerminationType)
+    circuit_termination: CircuitTerminationType = strawberry_django.field()
+    circuit_termination_list: List[CircuitTerminationType] = strawberry_django.field()
 
-    circuit_type = ObjectField(CircuitTypeType)
-    circuit_type_list = ObjectListField(CircuitTypeType)
+    circuit_type: CircuitTypeType = strawberry_django.field()
+    circuit_type_list: List[CircuitTypeType] = strawberry_django.field()
 
-    provider = ObjectField(ProviderType)
-    provider_list = ObjectListField(ProviderType)
+    circuit_group: CircuitGroupType = strawberry_django.field()
+    circuit_group_list: List[CircuitGroupType] = strawberry_django.field()
 
-    provider_network = ObjectField(ProviderNetworkType)
-    provider_network_list = ObjectListField(ProviderNetworkType)
+    circuit_group_assignment: CircuitGroupAssignmentType = strawberry_django.field()
+    circuit_group_assignment_list: List[CircuitGroupAssignmentType] = strawberry_django.field()
+
+    provider: ProviderType = strawberry_django.field()
+    provider_list: List[ProviderType] = strawberry_django.field()
+
+    provider_account: ProviderAccountType = strawberry_django.field()
+    provider_account_list: List[ProviderAccountType] = strawberry_django.field()
+
+    provider_network: ProviderNetworkType = strawberry_django.field()
+    provider_network_list: List[ProviderNetworkType] = strawberry_django.field()

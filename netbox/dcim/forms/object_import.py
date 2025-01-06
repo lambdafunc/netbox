@@ -1,59 +1,29 @@
 from django import forms
+from django.utils.translation import gettext_lazy as _
 
-from dcim.choices import InterfaceTypeChoices, PortTypeChoices
+from dcim.choices import InterfacePoEModeChoices, InterfacePoETypeChoices, InterfaceTypeChoices, PortTypeChoices
 from dcim.models import *
-from utilities.forms import BootstrapMixin
+from wireless.choices import WirelessRoleChoices
 
 __all__ = (
     'ConsolePortTemplateImportForm',
     'ConsoleServerPortTemplateImportForm',
     'DeviceBayTemplateImportForm',
-    'DeviceTypeImportForm',
     'FrontPortTemplateImportForm',
     'InterfaceTemplateImportForm',
     'InventoryItemTemplateImportForm',
     'ModuleBayTemplateImportForm',
-    'ModuleTypeImportForm',
     'PowerOutletTemplateImportForm',
     'PowerPortTemplateImportForm',
     'RearPortTemplateImportForm',
 )
 
 
-class DeviceTypeImportForm(BootstrapMixin, forms.ModelForm):
-    manufacturer = forms.ModelChoiceField(
-        queryset=Manufacturer.objects.all(),
-        to_field_name='name'
-    )
-
-    class Meta:
-        model = DeviceType
-        fields = [
-            'manufacturer', 'model', 'slug', 'part_number', 'u_height', 'is_full_depth', 'subdevice_role', 'airflow',
-            'comments',
-        ]
-
-
-class ModuleTypeImportForm(BootstrapMixin, forms.ModelForm):
-    manufacturer = forms.ModelChoiceField(
-        queryset=Manufacturer.objects.all(),
-        to_field_name='name'
-    )
-
-    class Meta:
-        model = ModuleType
-        fields = ['manufacturer', 'model', 'part_number', 'comments']
-
-
 #
 # Component template import forms
 #
 
-class ComponentTemplateImportForm(BootstrapMixin, forms.ModelForm):
-    pass
-
-
-class ConsolePortTemplateImportForm(ComponentTemplateImportForm):
+class ConsolePortTemplateImportForm(forms.ModelForm):
 
     class Meta:
         model = ConsolePortTemplate
@@ -62,7 +32,7 @@ class ConsolePortTemplateImportForm(ComponentTemplateImportForm):
         ]
 
 
-class ConsoleServerPortTemplateImportForm(ComponentTemplateImportForm):
+class ConsoleServerPortTemplateImportForm(forms.ModelForm):
 
     class Meta:
         model = ConsoleServerPortTemplate
@@ -71,7 +41,7 @@ class ConsoleServerPortTemplateImportForm(ComponentTemplateImportForm):
         ]
 
 
-class PowerPortTemplateImportForm(ComponentTemplateImportForm):
+class PowerPortTemplateImportForm(forms.ModelForm):
 
     class Meta:
         model = PowerPortTemplate
@@ -80,8 +50,9 @@ class PowerPortTemplateImportForm(ComponentTemplateImportForm):
         ]
 
 
-class PowerOutletTemplateImportForm(ComponentTemplateImportForm):
+class PowerOutletTemplateImportForm(forms.ModelForm):
     power_port = forms.ModelChoiceField(
+        label=_('Power port'),
         queryset=PowerPortTemplate.objects.all(),
         to_field_name='name',
         required=False
@@ -108,23 +79,42 @@ class PowerOutletTemplateImportForm(ComponentTemplateImportForm):
         return module_type
 
 
-class InterfaceTemplateImportForm(ComponentTemplateImportForm):
+class InterfaceTemplateImportForm(forms.ModelForm):
     type = forms.ChoiceField(
+        label=_('Type'),
         choices=InterfaceTypeChoices.CHOICES
+    )
+    poe_mode = forms.ChoiceField(
+        choices=InterfacePoEModeChoices,
+        required=False,
+        label=_('PoE mode')
+    )
+    poe_type = forms.ChoiceField(
+        choices=InterfacePoETypeChoices,
+        required=False,
+        label=_('PoE type')
+    )
+    rf_role = forms.ChoiceField(
+        choices=WirelessRoleChoices,
+        required=False,
+        label=_('Wireless role')
     )
 
     class Meta:
         model = InterfaceTemplate
         fields = [
-            'device_type', 'module_type', 'name', 'label', 'type', 'mgmt_only', 'description',
+            'device_type', 'module_type', 'name', 'label', 'type', 'enabled', 'mgmt_only', 'description', 'poe_mode',
+            'poe_type', 'rf_role'
         ]
 
 
-class FrontPortTemplateImportForm(ComponentTemplateImportForm):
+class FrontPortTemplateImportForm(forms.ModelForm):
     type = forms.ChoiceField(
+        label=_('Type'),
         choices=PortTypeChoices.CHOICES
     )
     rear_port = forms.ModelChoiceField(
+        label=_('Rear port'),
         queryset=RearPortTemplate.objects.all(),
         to_field_name='name'
     )
@@ -146,23 +136,24 @@ class FrontPortTemplateImportForm(ComponentTemplateImportForm):
     class Meta:
         model = FrontPortTemplate
         fields = [
-            'device_type', 'module_type', 'name', 'type', 'rear_port', 'rear_port_position', 'label', 'description',
+            'device_type', 'module_type', 'name', 'type', 'color', 'rear_port', 'rear_port_position', 'label', 'description',
         ]
 
 
-class RearPortTemplateImportForm(ComponentTemplateImportForm):
+class RearPortTemplateImportForm(forms.ModelForm):
     type = forms.ChoiceField(
+        label=_('Type'),
         choices=PortTypeChoices.CHOICES
     )
 
     class Meta:
         model = RearPortTemplate
         fields = [
-            'device_type', 'module_type', 'name', 'type', 'positions', 'label', 'description',
+            'device_type', 'module_type', 'name', 'type', 'color', 'positions', 'label', 'description',
         ]
 
 
-class ModuleBayTemplateImportForm(ComponentTemplateImportForm):
+class ModuleBayTemplateImportForm(forms.ModelForm):
 
     class Meta:
         model = ModuleBayTemplate
@@ -171,7 +162,7 @@ class ModuleBayTemplateImportForm(ComponentTemplateImportForm):
         ]
 
 
-class DeviceBayTemplateImportForm(ComponentTemplateImportForm):
+class DeviceBayTemplateImportForm(forms.ModelForm):
 
     class Meta:
         model = DeviceBayTemplate
@@ -180,17 +171,20 @@ class DeviceBayTemplateImportForm(ComponentTemplateImportForm):
         ]
 
 
-class InventoryItemTemplateImportForm(ComponentTemplateImportForm):
+class InventoryItemTemplateImportForm(forms.ModelForm):
     parent = forms.ModelChoiceField(
+        label=_('Parent'),
         queryset=InventoryItemTemplate.objects.all(),
         required=False
     )
     role = forms.ModelChoiceField(
+        label=_('Role'),
         queryset=InventoryItemRole.objects.all(),
         to_field_name='name',
         required=False
     )
     manufacturer = forms.ModelChoiceField(
+        label=_('Manufacturer'),
         queryset=Manufacturer.objects.all(),
         to_field_name='name',
         required=False

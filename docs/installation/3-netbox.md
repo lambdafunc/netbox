@@ -6,8 +6,8 @@ This section of the documentation discusses installing and configuring the NetBo
 
 Begin by installing all system packages required by NetBox and its dependencies.
 
-!!! warning "Python 3.8 or later required"
-    NetBox v3.2 requires Python 3.8, 3.9, or 3.10.
+!!! warning "Python 3.10 or later required"
+    NetBox supports Python 3.10, 3.11, and 3.12.
 
 === "Ubuntu"
 
@@ -21,7 +21,7 @@ Begin by installing all system packages required by NetBox and its dependencies.
     sudo yum install -y gcc libxml2-devel libxslt-devel libffi-devel libpq-devel openssl-devel redhat-rpm-config
     ```
 
-Before continuing, check that your installed Python version is at least 3.8:
+Before continuing, check that your installed Python version is at least 3.10:
 
 ```no-highlight
 python3 -V
@@ -36,7 +36,7 @@ This documentation provides two options for installing NetBox: from a downloadab
 Download the [latest stable release](https://github.com/netbox-community/netbox/releases) from GitHub as a tarball or ZIP archive and extract it to your desired path. In this example, we'll use `/opt/netbox` as the NetBox root.
 
 ```no-highlight
-sudo wget https://github.com/netbox-community/netbox/archive/vX.Y.Z.tar.gz
+sudo wget https://github.com/netbox-community/netbox/archive/refs/tags/vX.Y.Z.tar.gz
 sudo tar -xzf vX.Y.Z.tar.gz -C /opt
 sudo ln -s /opt/netbox-X.Y.Z/ /opt/netbox
 ```
@@ -100,6 +100,8 @@ Create a system user account named `netbox`. We'll configure the WSGI and HTTP s
     ```
     sudo adduser --system --group netbox
     sudo chown --recursive netbox /opt/netbox/netbox/media/
+    sudo chown --recursive netbox /opt/netbox/netbox/reports/
+    sudo chown --recursive netbox /opt/netbox/netbox/scripts/
     ```
 
 === "CentOS"
@@ -108,6 +110,8 @@ Create a system user account named `netbox`. We'll configure the WSGI and HTTP s
     sudo groupadd --system netbox
     sudo adduser --system -g netbox netbox
     sudo chown --recursive netbox /opt/netbox/netbox/media/
+    sudo chown --recursive netbox /opt/netbox/netbox/reports/
+    sudo chown --recursive netbox /opt/netbox/netbox/scripts/
     ```
 
 ## Configuration
@@ -142,7 +146,7 @@ ALLOWED_HOSTS = ['*']
 
 ### DATABASE
 
-This parameter holds the database configuration details. You must define the username and password used when you configured PostgreSQL. If the service is running on a remote host, update the `HOST` and `PORT` parameters accordingly. See the [configuration documentation](../configuration/required-settings.md#database) for more detail on individual parameters.
+This parameter holds the database configuration details. You must define the username and password used when you configured PostgreSQL. If the service is running on a remote host, update the `HOST` and `PORT` parameters accordingly. See the [configuration documentation](../configuration/required-parameters.md#database) for more detail on individual parameters.
 
 ```python
 DATABASE = {
@@ -157,7 +161,7 @@ DATABASE = {
 
 ### REDIS
 
-Redis is a in-memory key-value store used by NetBox for caching and background task queuing. Redis typically requires minimal configuration; the values below should suffice for most installations. See the [configuration documentation](../configuration/required-settings.md#redis) for more detail on individual parameters.
+Redis is a in-memory key-value store used by NetBox for caching and background task queuing. Redis typically requires minimal configuration; the values below should suffice for most installations. See the [configuration documentation](../configuration/required-parameters.md#redis) for more detail on individual parameters.
 
 Note that NetBox requires the specification of two separate Redis databases: `tasks` and `caching`. These may both be provided by the same Redis service, however each should have a unique numeric database ID.
 
@@ -199,21 +203,40 @@ When you have finished modifying the configuration, remember to save the file.
 
 All Python packages required by NetBox are listed in `requirements.txt` and will be installed automatically. NetBox also supports some optional packages. If desired, these packages must be listed in `local_requirements.txt` within the NetBox root directory.
 
-### NAPALM
-
-Integration with the [NAPALM automation](../additional-features/napalm.md) library allows NetBox to fetch live data from devices and return it to a requester via its REST API. The `NAPALM_USERNAME` and `NAPALM_PASSWORD` configuration parameters define the credentials to be used when connecting to a device.
-
-```no-highlight
-sudo sh -c "echo 'napalm' >> /opt/netbox/local_requirements.txt"
-```
-
 ### Remote File Storage
 
-By default, NetBox will use the local filesystem to store uploaded files. To use a remote filesystem, install the [`django-storages`](https://django-storages.readthedocs.io/en/stable/) library and configure your [desired storage backend](../configuration/optional-settings.md#storage_backend) in `configuration.py`.
+By default, NetBox will use the local filesystem to store uploaded files. To use a remote filesystem, install the [`django-storages`](https://django-storages.readthedocs.io/en/stable/) library and configure your [desired storage backend](../configuration/system.md#storage_backend) in `configuration.py`.
 
 ```no-highlight
 sudo sh -c "echo 'django-storages' >> /opt/netbox/local_requirements.txt"
 ```
+
+### Remote Data Sources
+
+NetBox supports integration with several remote data sources via configurable backends. Each of these requires the installation of one or more additional libraries.
+
+* Amazon S3: [`boto3`](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html)
+* Git: [`dulwich`](https://www.dulwich.io/)
+
+For example, to enable the Amazon S3 backend, add `boto3` to your local requirements file:
+
+```no-highlight
+sudo sh -c "echo 'boto3' >> /opt/netbox/local_requirements.txt"
+```
+
+!!! info
+    These packages were previously required in NetBox v3.5 but now are optional.
+
+### Sentry Integration
+
+NetBox may be configured to send error reports to [Sentry](../administration/error-reporting.md) for analysis. This integration requires installation of the `sentry-sdk` Python library.
+
+```no-highlight
+sudo sh -c "echo 'sentry-sdk' >> /opt/netbox/local_requirements.txt"
+```
+
+!!! info
+    Sentry integration was previously included by default in NetBox v3.6 but is now optional.
 
 ## Run the Upgrade Script
 
@@ -225,14 +248,17 @@ Once NetBox has been configured, we're ready to proceed with the actual installa
 * Builds the documentation locally (for offline use)
 * Aggregate static resource files on disk
 
+!!! warning
+    If you still have a Python virtual environment active from a previous installation step, disable it now by running the `deactivate` command. This will avoid errors on systems where `sudo` has been configured to preserve the user's current environment.
+
 ```no-highlight
 sudo /opt/netbox/upgrade.sh
 ```
 
-Note that **Python 3.8 or later is required** for NetBox v3.2 and later releases. If the default Python installation on your server is set to a lesser version,  pass the path to the supported installation as an environment variable named `PYTHON`. (Note that the environment variable must be passed _after_ the `sudo` command.)
+Note that **Python 3.10 or later is required** for NetBox v4.0 and later releases. If the default Python installation on your server is set to a lesser version,  pass the path to the supported installation as an environment variable named `PYTHON`. (Note that the environment variable must be passed _after_ the `sudo` command.)
 
 ```no-highlight
-sudo PYTHON=/usr/bin/python3.8 /opt/netbox/upgrade.sh
+sudo PYTHON=/usr/bin/python3.10 /opt/netbox/upgrade.sh
 ```
 
 !!! note
@@ -269,7 +295,10 @@ See the [housekeeping documentation](../administration/housekeeping.md) for furt
 
 ## Test the Application
 
-At this point, we should be able to run NetBox's development server for testing. We can check by starting a development instance:
+At this point, we should be able to run NetBox's development server for testing. We can check by starting a development instance locally.
+
+!!! tip
+    Check that the Python virtual environment is still active before attempting to run the server.
 
 ```no-highlight
 python3 manage.py runserver 0.0.0.0:8000 --insecure

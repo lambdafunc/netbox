@@ -3,19 +3,19 @@ import json
 from django import forms
 from django.db.models import Count
 from django.forms.fields import JSONField as _JSONField, InvalidJSONInput
+from django.templatetags.static import static
+from django.utils.translation import gettext_lazy as _
 from netaddr import AddrFormatError, EUI
 
 from utilities.forms import widgets
 from utilities.validators import EnhancedURLValidator
 
 __all__ = (
-    'ChoiceField',
     'ColorField',
     'CommentField',
     'JSONField',
     'LaxURLField',
     'MACAddressField',
-    'MultipleChoiceField',
     'SlugField',
     'TagFilterField',
 )
@@ -25,15 +25,14 @@ class CommentField(forms.CharField):
     """
     A textarea with support for Markdown rendering. Exists mostly just to add a standard `help_text`.
     """
-    widget = forms.Textarea
-    # TODO: Port Markdown cheat sheet to internal documentation
-    help_text = """
-        <i class="mdi mdi-information-outline"></i>
-        <a href="https://github.com/adam-p/markdown-here/wiki/Markdown-Cheatsheet" target="_blank" tabindex="-1">
-        Markdown</a> syntax is supported
-    """
+    widget = widgets.MarkdownWidget
+    label = _('Comments')
+    help_text = _(
+        '<i class="mdi mdi-information-outline"></i> '
+        '<a href="{url}" target="_blank" tabindex="-1">Markdown</a> syntax is supported'
+    ).format(url=static('docs/reference/markdown/'))
 
-    def __init__(self, *, label='', help_text=help_text, required=False, **kwargs):
+    def __init__(self, *, label=label, help_text=help_text, required=False, **kwargs):
         super().__init__(label=label, help_text=help_text, required=required, **kwargs)
 
 
@@ -45,10 +44,11 @@ class SlugField(forms.SlugField):
         slug_source: Name of the form field from which the slug value will be derived
     """
     widget = widgets.SlugWidget
-    help_text = "URL-friendly unique shorthand"
+    label = _('Slug')
+    help_text = _("URL-friendly unique shorthand")
 
-    def __init__(self, *, slug_source='name', help_text=help_text, **kwargs):
-        super().__init__(help_text=help_text, **kwargs)
+    def __init__(self, *, slug_source='name', label=label, help_text=help_text, **kwargs):
+        super().__init__(label=label, help_text=help_text, **kwargs)
 
         self.widget.attrs['slug-source'] = slug_source
 
@@ -67,7 +67,6 @@ class TagFilterField(forms.MultipleChoiceField):
 
     :param model: The model of the filter
     """
-    widget = widgets.StaticSelectMultiple
 
     def __init__(self, model, *args, **kwargs):
         def get_choices():
@@ -79,7 +78,7 @@ class TagFilterField(forms.MultipleChoiceField):
             ]
 
         # Choices are fetched each time the form is initialized
-        super().__init__(label='Tags', choices=get_choices, required=False, *args, **kwargs)
+        super().__init__(label=_('Tags'), choices=get_choices, required=False, *args, **kwargs)
 
 
 class LaxURLField(forms.URLField):
@@ -94,18 +93,26 @@ class JSONField(_JSONField):
     """
     Custom wrapper around Django's built-in JSONField to avoid presenting "null" as the default text.
     """
+    empty_values = [None, '', ()]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self.help_text:
-            self.help_text = 'Enter context data in <a href="https://json.org/">JSON</a> format.'
+            self.help_text = _('Enter context data in <a href="https://json.org/">JSON</a> format.')
             self.widget.attrs['placeholder'] = ''
+            self.widget.attrs['class'] = 'font-monospace'
 
     def prepare_value(self, value):
         if isinstance(value, InvalidJSONInput):
             return value
-        if value is None:
+        if value in ('', None):
             return ''
-        return json.dumps(value, sort_keys=True, indent=4)
+        if type(value) is str:
+            try:
+                value = json.loads(value, cls=self.decoder)
+            except json.decoder.JSONDecodeError:
+                return value
+        return json.dumps(value, sort_keys=True, indent=4, ensure_ascii=False, cls=self.encoder)
 
 
 class MACAddressField(forms.Field):
@@ -114,7 +121,7 @@ class MACAddressField(forms.Field):
     """
     widget = forms.CharField
     default_error_messages = {
-        'invalid': 'MAC address must be in EUI-48 format',
+        'invalid': _('MAC address must be in EUI-48 format'),
     }
 
     def to_python(self, value):
@@ -127,21 +134,3 @@ class MACAddressField(forms.Field):
             raise forms.ValidationError(self.error_messages['invalid'], code='invalid')
 
         return value
-
-
-#
-# Choice fields
-#
-
-class ChoiceField(forms.ChoiceField):
-    """
-    Overrides Django's built-in `ChoiceField` to use NetBox's `StaticSelect` widget
-    """
-    widget = widgets.StaticSelect
-
-
-class MultipleChoiceField(forms.MultipleChoiceField):
-    """
-    Overrides Django's built-in `MultipleChoiceField` to use NetBox's `StaticSelectMultiple` widget
-    """
-    widget = widgets.StaticSelectMultiple

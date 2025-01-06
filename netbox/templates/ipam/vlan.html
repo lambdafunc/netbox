@@ -2,98 +2,97 @@
 {% load helpers %}
 {% load render_table from django_tables2 %}
 {% load plugins %}
+{% load i18n %}
+{% load mptt %}
 
 {% block content %}
     <div class="row">
         <div class="col col-md-6">
             <div class="card">
-                <h5 class="card-header">
-                    VLAN
-                </h5>
-                <div class="card-body">
-                    <table class="table table-hover attr-table">
+                <h2 class="card-header">{% trans "VLAN" %}</h2>
+                <table class="table table-hover attr-table">
+                    {% if object.site.region %}
                         <tr>
-                            <th scope="row">Site</th>
+                            <th scope="row">{% trans "Region" %}</th>
                             <td>
-                                {% if object.site %}
-                                    {% if object.site.region %}
-                                        {{ object.site.region|linkify }} /
-                                    {% endif %}
-                                    {{ object.site|linkify }}
-                                {% else %}
-                                    <span class="text-muted">None</span>
-                                {% endif %}
+                                {% nested_tree object.site.region %}
                             </td>
                         </tr>
-                        <tr>
-                            <th scope="row">Group</th>
-                            <td>{{ object.group|linkify|placeholder }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">VLAN ID</th>
-                            <td>{{ object.vid }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Name</th>
-                            <td>{{ object.name }}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Tenant</th>
-                            <td>
-                                {% if object.tenant.group %}
-                                    {{ object.tenant.group|linkify }} /
-                                {% endif %}
-                                {{ object.tenant|linkify|placeholder }}
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Status</th>
-                            <td>{% badge object.get_status_display bg_color=object.get_status_color %}</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Role</th>
-                            <td>
-                                {% if object.role %}
-                                    <a href="{% url 'ipam:vlan_list' %}?role={{ object.role.slug }}">{{ object.role }}</a>
-                                {% else %}
-                                    <span class="text-muted">None</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Description</th>
-                            <td>{{ object.description|placeholder }}</td>
-                        </tr>
-                    </table>
-                </div>
+                    {% endif %}
+                    <tr>
+                        <th scope="row">{% trans "Site" %}</th>
+                        <td>{{ object.site|linkify|placeholder }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">{% trans "Group" %}</th>
+                        <td>{{ object.group|linkify|placeholder }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">{% trans "VLAN ID" %}</th>
+                        <td>{{ object.vid }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">{% trans "Name" %}</th>
+                        <td>{{ object.name }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">{% trans "Tenant" %}</th>
+                        <td>
+                            {% if object.tenant.group %}
+                                {{ object.tenant.group|linkify }} /
+                            {% endif %}
+                            {{ object.tenant|linkify|placeholder }}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">{% trans "Status" %}</th>
+                        <td>{% badge object.get_status_display bg_color=object.get_status_color %}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">{% trans "Role" %}</th>
+                        <td>
+                            {% if object.role %}
+                                <a href="{% url 'ipam:vlan_list' %}?role={{ object.role.slug }}">{{ object.role }}</a>
+                            {% else %}
+                                {{ ''|placeholder }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">{% trans "Description" %}</th>
+                        <td>{{ object.description|placeholder }}</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">{% trans "L2VPN" %}</th>
+                      <td>{{ object.l2vpn_termination.l2vpn|linkify|placeholder }}</td>
+                    </tr>
+                </table>
             </div>
             {% plugin_left_page object %}
         </div>
         <div class="col col-md-6">
-            {% include 'inc/panels/custom_fields.html' %}
-            {% include 'inc/panels/tags.html' %}
-            {% plugin_right_page object %}
+          {% include 'inc/panels/custom_fields.html' %}
+          {% include 'inc/panels/tags.html' %}
+          {% include 'inc/panels/comments.html' %}
+          {% plugin_right_page object %}
         </div>
     </div>
     <div class="row">
-        <div class="col col-md-12">
-            <div class="card">
-                <h5 class="card-header">
-                    Prefixes
-                </h5>
-                <div class="card-body table-responsive">
-                    {% render_table prefix_table 'inc/table.html' %}
-                </div>
-                {% if perms.ipam.add_prefix %}
-                <div class="card-footer text-end noprint">
-                    <a href="{% url 'ipam:prefix_add' %}?{% if object.tenant %}tenant={{ object.tenant.pk }}&{% endif %}site={{ object.site.pk }}&vlan={{ object.pk }}" class="btn btn-primary btn-sm">
-                        <i class="mdi mdi-plus-thick" aria-hidden="true"></i>
-                        Add a Prefix
-                    </a>
-                </div>
-                {% endif %}
-            </div>
-            {% plugin_full_width_page object %}
+      <div class="col col-md-12">
+        <div class="card">
+          <h2 class="card-header">
+            {% trans "Prefixes" %}
+            {% if perms.ipam.add_prefix %}
+              <div class="card-actions">
+                <a href="{% url 'ipam:prefix_add' %}?{% if object.tenant %}tenant={{ object.tenant.pk }}&{% endif %}site={{ object.site.pk }}&vlan={{ object.pk }}" class="btn btn-ghost-primary btn-sm">
+                  <i class="mdi mdi-plus-thick" aria-hidden="true"></i> {% trans "Add a Prefix" %}
+                </a>
+              </div>
+            {% endif %}
+          </h2>
+          {% htmx_table 'ipam:prefix_list' vlan_id=object.pk %}
         </div>
+        {% plugin_full_width_page object %}
+      </div>
     </div>
 {% endblock %}

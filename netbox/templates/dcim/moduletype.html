@@ -1,40 +1,65 @@
-{% extends 'dcim/moduletype/base.html' %}
+{% extends 'generic/object.html' %}
 {% load buttons %}
 {% load helpers %}
 {% load plugins %}
+{% load i18n %}
+
+{% block title %}{{ object.manufacturer }} {{ object.model }}{% endblock %}
+
+{% block breadcrumbs %}
+  {{ block.super }}
+  {%  include 'dcim/inc/devicetype_breadcrumbs.html' %}
+{% endblock %}
+
+{% block extra_controls %}
+  {%  include 'dcim/inc/moduletype_buttons.html' %}
+{% endblock %}
 
 {% block content %}
   <div class="row">
     <div class="col col-md-6">
       <div class="card">
-        <h5 class="card-header">Module Type</h5>
-        <div class="card-body">
-          <table class="table table-hover attr-table">
-            <tr>
-              <td>Manufacturer</td>
-              <td>{{ object.manufacturer|linkify }}</td>
-            </tr>
-            <tr>
-              <td>Model Name</td>
-              <td>{{ object.model }}</td>
-            </tr>
-            <tr>
-              <td>Part Number</td>
-              <td>{{ object.part_number|placeholder }}</td>
-            </tr>
-            <tr>
-              <td>Instances</td>
-              <td><a href="{% url 'dcim:module_list' %}?module_type_id={{ object.pk }}">{{ instance_count }}</a></td>
-            </tr>
-          </table>
-        </div>
+        <h2 class="card-header">{% trans "Module Type" %}</h2>
+        <table class="table table-hover attr-table">
+          <tr>
+            <th scope="row">{% trans "Manufacturer" %}</th>
+            <td>{{ object.manufacturer|linkify }}</td>
+          </tr>
+          <tr>
+            <th scope="row">{% trans "Model Name" %}</th>
+            <td>{{ object.model }}</td>
+          </tr>
+          <tr>
+            <th scope="row">{% trans "Part Number" %}</th>
+            <td>{{ object.part_number|placeholder }}</td>
+          </tr>
+          <tr>
+            <th scope="row">{% trans "Description" %}</th>
+            <td>{{ object.description|placeholder }}</td>
+          </tr>
+          <tr>
+            <th scope="row">{% trans "Airflow" %}</th>
+            <td>{{ object.get_airflow_display|placeholder }}</td>
+          </tr>
+          <tr>
+            <th scope="row">{% trans "Weight" %}</th>
+            <td>
+            {% if object.weight %}
+              {{ object.weight|floatformat }} {{ object.get_weight_unit_display }}
+            {% else %}
+              {{ ''|placeholder }}
+            {% endif %}
+            </td>
+          </tr>
+        </table>
       </div>
-      {% include 'inc/panels/custom_fields.html' %}
+      {% include 'inc/panels/tags.html' %}
+      {% include 'inc/panels/comments.html' %}
       {% plugin_left_page object %}
     </div>
     <div class="col col-md-6">
-      {% include 'inc/panels/tags.html' %}
-      {% include 'inc/panels/comments.html' %}
+      {% include 'inc/panels/related_objects.html' %}
+      {% include 'inc/panels/custom_fields.html' %}
       {% include 'inc/panels/image_attachments.html' %}
       {% plugin_right_page object %}
     </div>

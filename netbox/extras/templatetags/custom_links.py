@@ -1,11 +1,10 @@
-from collections import OrderedDict
-
 from django import template
-from django.contrib.contenttypes.models import ContentType
+from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
+from core.models import ObjectType
 from extras.models import CustomLink
-from utilities.utils import render_jinja2
+from netbox.choices import ButtonColorChoices
 
 
 register = template.Library()
@@ -35,22 +34,21 @@ def custom_links(context, obj):
     """
     Render all applicable links for the given object.
     """
-    content_type = ContentType.objects.get_for_model(obj)
-    custom_links = CustomLink.objects.filter(content_type=content_type, enabled=True)
+    object_type = ObjectType.objects.get_for_model(obj)
+    custom_links = CustomLink.objects.filter(object_types=object_type, enabled=True)
     if not custom_links:
         return ''
 
     # Pass select context data when rendering the CustomLink
     link_context = {
         'object': obj,
-        'obj': obj,  # TODO: Remove in NetBox v3.5
         'debug': context.get('debug', False),  # django.template.context_processors.debug
         'request': context['request'],  # django.template.context_processors.request
         'user': context['user'],  # django.contrib.auth.context_processors.auth
         'perms': context['perms'],  # django.contrib.auth.context_processors.auth
     }
     template_code = ''
-    group_names = OrderedDict()
+    group_names = {}
 
     for cl in custom_links:
 
@@ -62,14 +60,14 @@ def custom_links(context, obj):
 
         # Add non-grouped links
         else:
+            button_class = 'outline-secondary' if cl.button_class == ButtonColorChoices.DEFAULT else cl.button_class
             try:
-                rendered = cl.render(link_context)
-                if rendered:
+                if rendered := cl.render(link_context):
                     template_code += LINK_BUTTON.format(
-                        rendered['link'], rendered['link_target'], cl.button_class, rendered['text']
+                        rendered['link'], rendered['link_target'], button_class, rendered['text']
                     )
             except Exception as e:
-                template_code += f'<a class="btn btn-sm btn-outline-dark" disabled="disabled" title="{e}">' \
+                template_code += f'<a class="btn btn-sm btn-outline-secondary" disabled="disabled" title="{e}">' \
                                  f'<i class="mdi mdi-alert"></i> {cl.name}</a>\n'
 
     # Add grouped links to template
@@ -79,8 +77,7 @@ def custom_links(context, obj):
 
         for cl in links:
             try:
-                rendered = cl.render(link_context)
-                if rendered:
+                if rendered := cl.render(link_context):
                     links_rendered.append(
                         GROUP_LINK.format(rendered['link'], rendered['link_target'], rendered['text'])
                     )
@@ -92,7 +89,7 @@ def custom_links(context, obj):
 
         if links_rendered:
             template_code += GROUP_BUTTON.format(
-                links[0].button_class, group, ''.join(links_rendered)
+                links[0].button_class, escape(group), ''.join(links_rendered)
             )
 
     return mark_safe(template_code)

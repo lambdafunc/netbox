@@ -1,9 +1,11 @@
 from django import forms
+from django.utils.translation import gettext_lazy as _
 
 from dcim.models import *
-from extras.forms import CustomFieldsMixin
 from extras.models import Tag
-from utilities.forms import DynamicModelMultipleChoiceField, ExpandableNameField, form_from_model
+from netbox.forms.mixins import CustomFieldsMixin
+from utilities.forms import form_from_model
+from utilities.forms.fields import DynamicModelMultipleChoiceField, ExpandableNameField
 from .object_create import ComponentCreateForm
 
 __all__ = (
@@ -30,13 +32,16 @@ class DeviceBulkAddComponentForm(CustomFieldsMixin, ComponentCreateForm):
         widget=forms.MultipleHiddenInput()
     )
     description = forms.CharField(
+        label=_('Description'),
         max_length=100,
         required=False
     )
     tags = DynamicModelMultipleChoiceField(
+        label=_('Tags'),
         queryset=Tag.objects.all(),
         required=False
     )
+    replication_fields = ('name', 'label')
 
 
 class ConsolePortBulkCreateForm(
@@ -44,7 +49,7 @@ class ConsolePortBulkCreateForm(
     DeviceBulkAddComponentForm
 ):
     model = ConsolePort
-    field_order = ('name_pattern', 'label_pattern', 'type', 'mark_connected', 'description', 'tags')
+    field_order = ('name', 'label', 'type', 'mark_connected', 'description', 'tags')
 
 
 class ConsoleServerPortBulkCreateForm(
@@ -52,7 +57,7 @@ class ConsoleServerPortBulkCreateForm(
     DeviceBulkAddComponentForm
 ):
     model = ConsoleServerPort
-    field_order = ('name_pattern', 'label_pattern', 'type', 'speed', 'description', 'tags')
+    field_order = ('name', 'label', 'type', 'speed', 'description', 'tags')
 
 
 class PowerPortBulkCreateForm(
@@ -60,7 +65,7 @@ class PowerPortBulkCreateForm(
     DeviceBulkAddComponentForm
 ):
     model = PowerPort
-    field_order = ('name_pattern', 'label_pattern', 'type', 'maximum_draw', 'allocated_draw', 'description', 'tags')
+    field_order = ('name', 'label', 'type', 'maximum_draw', 'allocated_draw', 'description', 'tags')
 
 
 class PowerOutletBulkCreateForm(
@@ -68,16 +73,19 @@ class PowerOutletBulkCreateForm(
     DeviceBulkAddComponentForm
 ):
     model = PowerOutlet
-    field_order = ('name_pattern', 'label_pattern', 'type', 'feed_leg', 'description', 'tags')
+    field_order = ('name', 'label', 'type', 'feed_leg', 'description', 'tags')
 
 
 class InterfaceBulkCreateForm(
-    form_from_model(Interface, ['type', 'enabled', 'speed', 'duplex', 'mtu', 'mgmt_only', 'mark_connected']),
+    form_from_model(Interface, [
+        'type', 'enabled', 'speed', 'duplex', 'mtu', 'mgmt_only', 'mark_connected', 'poe_mode', 'poe_type', 'rf_role'
+    ]),
     DeviceBulkAddComponentForm
 ):
     model = Interface
     field_order = (
-        'name_pattern', 'label_pattern', 'type', 'enabled', 'speed', 'duplex', 'mtu', 'mgmt_only', 'mark_connected', 'description', 'tags',
+        'name', 'label', 'type', 'enabled', 'speed', 'duplex', 'mtu', 'mgmt_only', 'poe_mode',
+        'poe_type', 'mark_connected', 'rf_role', 'description', 'tags',
     )
 
 
@@ -93,23 +101,23 @@ class RearPortBulkCreateForm(
     DeviceBulkAddComponentForm
 ):
     model = RearPort
-    field_order = ('name_pattern', 'label_pattern', 'type', 'positions', 'mark_connected', 'description', 'tags')
+    field_order = ('name', 'label', 'type', 'positions', 'mark_connected', 'description', 'tags')
 
 
 class ModuleBayBulkCreateForm(DeviceBulkAddComponentForm):
     model = ModuleBay
-    field_order = ('name_pattern', 'label_pattern', 'position_pattern', 'description', 'tags')
-
-    position_pattern = ExpandableNameField(
-        label='Position',
+    field_order = ('name', 'label', 'position', 'description', 'tags')
+    replication_fields = ('name', 'label', 'position')
+    position = ExpandableNameField(
+        label=_('Position'),
         required=False,
-        help_text='Alphanumeric ranges are supported. (Must match the number of names being created.)'
+        help_text=_('Alphanumeric ranges are supported. (Must match the number of names being created.)')
     )
 
 
 class DeviceBayBulkCreateForm(DeviceBulkAddComponentForm):
     model = DeviceBay
-    field_order = ('name_pattern', 'label_pattern', 'description', 'tags')
+    field_order = ('name', 'label', 'description', 'tags')
 
 
 class InventoryItemBulkCreateForm(
@@ -118,6 +126,6 @@ class InventoryItemBulkCreateForm(
 ):
     model = InventoryItem
     field_order = (
-        'name_pattern', 'label_pattern', 'role', 'manufacturer', 'part_id', 'serial', 'asset_tag', 'discovered',
+        'name', 'label', 'role', 'manufacturer', 'part_id', 'serial', 'asset_tag', 'discovered',
         'description', 'tags',
     )

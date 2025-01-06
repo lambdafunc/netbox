@@ -18,6 +18,9 @@ Default: False
 
 Set to True to enable automatic error reporting via [Sentry](https://sentry.io/).
 
+!!! note
+    The `sentry-sdk` Python package is required to enable Sentry integration.
+
 ---
 
 ## SENTRY_SAMPLE_RATE
@@ -25,6 +28,17 @@ Set to True to enable automatic error reporting via [Sentry](https://sentry.io/)
 Default: 1.0 (all)
 
 The sampling rate for errors. Must be a value between 0 (disabled) and 1.0 (report on all errors).
+
+---
+
+## SENTRY_SEND_DEFAULT_PII
+
+Default: False
+
+Maps to the Sentry SDK's [`send_default_pii`](https://docs.sentry.io/platforms/python/configuration/options/#send-default-pii) parameter. If enabled, certain personally identifiable information (PII) is added.
+
+!!! warning "Sensitive data"
+    If you enable this option, be aware that sensitive data such as cookies and authentication tokens will be logged.
 
 ---
 

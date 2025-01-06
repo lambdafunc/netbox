@@ -1,29 +1,30 @@
+from functools import cached_property
+
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
-from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Sum
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 from mptt.models import MPTTModel, TreeForeignKey
 
 from dcim.choices import *
 from dcim.constants import *
 from dcim.fields import MACAddressField, WWNField
-from dcim.svg import CableTraceSVG
+from netbox.choices import ColorChoices
 from netbox.models import OrganizationalModel, NetBoxModel
-from utilities.choices import ColorChoices
 from utilities.fields import ColorField, NaturalOrderingField
 from utilities.mptt import TreeManager
 from utilities.ordering import naturalize_interface
 from utilities.query_functions import CollateAsChar
+from utilities.tracking import TrackingModelMixin
 from wireless.choices import *
 from wireless.utils import get_channel_attr
 
-
 __all__ = (
     'BaseInterface',
-    'LinkTermination',
+    'CabledObjectModel',
     'ConsolePort',
     'ConsoleServerPort',
     'DeviceBay',
@@ -49,6 +50,7 @@ class ComponentModel(NetBoxModel):
         related_name='%(class)ss'
     )
     name = models.CharField(
+        verbose_name=_('name'),
         max_length=64
     )
     _name = NaturalOrderingField(
@@ -57,17 +59,32 @@ class ComponentModel(NetBoxModel):
         blank=True
     )
     label = models.CharField(
+        verbose_name=_('label'),
         max_length=64,
         blank=True,
-        help_text="Physical label"
+        help_text=_('Physical label')
     )
     description = models.CharField(
+        verbose_name=_('description'),
         max_length=200,
         blank=True
     )
 
     class Meta:
         abstract = True
+        ordering = ('device', '_name')
+        constraints = (
+            models.UniqueConstraint(
+                fields=('device', 'name'),
+                name='%(app_label)s_%(class)s_unique_device_name'
+            ),
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Cache the original Device ID for reference under clean()
+        self._original_device = self.__dict__.get('device_id')
 
     def __str__(self):
         if self.label:
@@ -78,6 +95,15 @@ class ComponentModel(NetBoxModel):
         objectchange = super().to_objectchange(action)
         objectchange.related_object = self.device
         return objectchange
+
+    def clean(self):
+        super().clean()
+
+        # Check list of Modules that allow device field to be changed
+        if (type(self) not in [InventoryItem]) and (self.pk is not None) and (self._original_device != self.device_id):
+            raise ValidationError({
+                "device": _("Components cannot be moved to a different device.")
+            })
 
     @property
     def parent_object(self):
@@ -95,22 +121,17 @@ class ModularComponentModel(ComponentModel):
     inventory_items = GenericRelation(
         to='dcim.InventoryItem',
         content_type_field='component_type',
-        object_id_field='component_id',
-        related_name='%(class)ss',
+        object_id_field='component_id'
     )
 
-    class Meta:
+    class Meta(ComponentModel.Meta):
         abstract = True
 
 
-class LinkTermination(models.Model):
+class CabledObjectModel(models.Model):
     """
-    An abstract model inherited by all models to which a Cable, WirelessLink, or other such link can terminate. Examples
-    include most device components, CircuitTerminations, and PowerFeeds. The `cable` and `wireless_link` fields
-    reference the attached Cable or WirelessLink instance, respectively.
-
-    `_link_peer` is a GenericForeignKey used to cache the far-end LinkTermination on the local instance; this is a
-    shortcut to referencing `instance.link.termination_b`, for example.
+    An abstract model inherited by all models to which a Cable can terminate. Provides the `cable` and `cable_end`
+    fields for caching cable associations, as well as `mark_connected` to designate "fake" connections.
     """
     cable = models.ForeignKey(
         to='dcim.Cable',
@@ -119,36 +140,23 @@ class LinkTermination(models.Model):
         blank=True,
         null=True
     )
-    _link_peer_type = models.ForeignKey(
-        to=ContentType,
-        on_delete=models.SET_NULL,
-        related_name='+',
+    cable_end = models.CharField(
+        verbose_name=_('cable end'),
+        max_length=1,
         blank=True,
-        null=True
-    )
-    _link_peer_id = models.PositiveBigIntegerField(
-        blank=True,
-        null=True
-    )
-    _link_peer = GenericForeignKey(
-        ct_field='_link_peer_type',
-        fk_field='_link_peer_id'
+        choices=CableEndChoices
     )
     mark_connected = models.BooleanField(
+        verbose_name=_('mark connected'),
         default=False,
-        help_text="Treat as if a cable is connected"
+        help_text=_('Treat as if a cable is connected')
     )
 
-    # Generic relations to Cable. These ensure that an attached Cable is deleted if the terminated object is deleted.
-    _cabled_as_a = GenericRelation(
-        to='dcim.Cable',
-        content_type_field='termination_a_type',
-        object_id_field='termination_a_id'
-    )
-    _cabled_as_b = GenericRelation(
-        to='dcim.Cable',
-        content_type_field='termination_b_type',
-        object_id_field='termination_b_id'
+    cable_terminations = GenericRelation(
+        to='dcim.CableTermination',
+        content_type_field='termination_type',
+        object_id_field='termination_id',
+        related_query_name='%(class)s',
     )
 
     class Meta:
@@ -157,21 +165,18 @@ class LinkTermination(models.Model):
     def clean(self):
         super().clean()
 
-        if self.mark_connected and self.cable_id:
+        if self.cable and not self.cable_end:
             raise ValidationError({
-                "mark_connected": "Cannot mark as connected with a cable attached."
+                "cable_end": _("Must specify cable end (A or B) when attaching a cable.")
             })
-
-    def get_link_peer(self):
-        return self._link_peer
-
-    @property
-    def _occupied(self):
-        return bool(self.mark_connected or self.cable_id)
-
-    @property
-    def parent_object(self):
-        raise NotImplementedError("CableTermination models must implement parent_object()")
+        if self.cable_end and not self.cable:
+            raise ValidationError({
+                "cable_end": _("Cable end must not be set without a cable.")
+            })
+        if self.mark_connected and self.cable:
+            raise ValidationError({
+                "mark_connected": _("Cannot mark as connected with a cable attached.")
+            })
 
     @property
     def link(self):
@@ -180,17 +185,40 @@ class LinkTermination(models.Model):
         """
         return self.cable
 
+    @cached_property
+    def link_peers(self):
+        if self.cable:
+            peers = self.cable.terminations.exclude(cable_end=self.cable_end).prefetch_related('termination')
+            return [peer.termination for peer in peers]
+        return []
+
+    @property
+    def _occupied(self):
+        return bool(self.mark_connected or self.cable_id)
+
+    @property
+    def parent_object(self):
+        raise NotImplementedError(
+            _("{class_name} models must declare a parent_object property").format(class_name=self.__class__.__name__)
+        )
+
+    @property
+    def opposite_cable_end(self):
+        if not self.cable_end:
+            return None
+        return CableEndChoices.SIDE_A if self.cable_end == CableEndChoices.SIDE_B else CableEndChoices.SIDE_B
+
 
 class PathEndpoint(models.Model):
     """
-    An abstract model inherited by any CableTermination subclass which represents the end of a CablePath; specifically,
+    An abstract model inherited by any CabledObjectModel subclass which represents the end of a CablePath; specifically,
     these include ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet, Interface, and PowerFeed.
 
     `_path` references the CablePath originating from this instance, if any. It is set or cleared by the receivers in
     dcim.signals in response to changes in the cable path, and complements the `origin` GenericForeignKey field on the
     CablePath model. `_path` should not be accessed directly; rather, use the `path` property.
 
-    `connected_endpoint()` is a convenience method for returning the destination of the associated CablePath, if any.
+    `connected_endpoints()` is a convenience method for returning the destination of the associated CablePath, if any.
     """
     _path = models.ForeignKey(
         to='dcim.CablePath',
@@ -206,98 +234,100 @@ class PathEndpoint(models.Model):
         origin = self
         path = []
 
-        # Construct the complete path
+        # Construct the complete path (including e.g. bridged interfaces)
         while origin is not None:
 
             if origin._path is None:
                 break
 
-            path.extend([origin, *origin._path.get_path()])
-            while (len(path) + 1) % 3:
-                # Pad to ensure we have complete three-tuples (e.g. for paths that end at a non-connected FrontPort)
-                path.append(None)
-            path.append(origin._path.destination)
+            path.extend(origin._path.path_objects)
 
-            # Check for bridge interface to continue the trace
-            origin = getattr(origin._path.destination, 'bridge', None)
+            # If the path ends at a non-connected pass-through port, pad out the link and far-end terminations
+            if len(path) % 3 == 1:
+                path.extend(([], []))
+            # If the path ends at a site or provider network, inject a null "link" to render an attachment
+            elif len(path) % 3 == 2:
+                path.insert(-1, [])
 
-        # Return the path as a list of three-tuples (A termination, cable, B termination)
+            # Check for a bridged relationship to continue the trace
+            destinations = origin._path.destinations
+            if len(destinations) == 1:
+                origin = getattr(destinations[0], 'bridge', None)
+            else:
+                origin = None
+
+        # Return the path as a list of three-tuples (A termination(s), cable(s), B termination(s))
         return list(zip(*[iter(path)] * 3))
-
-    def get_trace_svg(self, base_url=None, width=None):
-        if width is not None:
-            trace = CableTraceSVG(self, base_url=base_url, width=width)
-        else:
-            trace = CableTraceSVG(self, base_url=base_url)
-        return trace.render()
 
     @property
     def path(self):
         return self._path
 
-    @property
-    def connected_endpoint(self):
+    @cached_property
+    def connected_endpoints(self):
         """
         Caching accessor for the attached CablePath's destination (if any)
         """
-        if not hasattr(self, '_connected_endpoint'):
-            self._connected_endpoint = self._path.destination if self._path else None
-        return self._connected_endpoint
+        return self._path.destinations if self._path else []
 
 
 #
 # Console components
 #
 
-class ConsolePort(ModularComponentModel, LinkTermination, PathEndpoint):
+class ConsolePort(ModularComponentModel, CabledObjectModel, PathEndpoint, TrackingModelMixin):
     """
     A physical console port within a Device. ConsolePorts connect to ConsoleServerPorts.
     """
     type = models.CharField(
+        verbose_name=_('type'),
         max_length=50,
         choices=ConsolePortTypeChoices,
         blank=True,
-        help_text='Physical port type'
+        help_text=_('Physical port type')
     )
     speed = models.PositiveIntegerField(
+        verbose_name=_('speed'),
         choices=ConsolePortSpeedChoices,
         blank=True,
         null=True,
-        help_text='Port speed in bits per second'
+        help_text=_('Port speed in bits per second')
     )
 
-    clone_fields = ['device', 'type', 'speed']
+    clone_fields = ('device', 'module', 'type', 'speed')
 
-    class Meta:
-        ordering = ('device', '_name')
-        unique_together = ('device', 'name')
+    class Meta(ModularComponentModel.Meta):
+        verbose_name = _('console port')
+        verbose_name_plural = _('console ports')
 
     def get_absolute_url(self):
         return reverse('dcim:consoleport', kwargs={'pk': self.pk})
 
 
-class ConsoleServerPort(ModularComponentModel, LinkTermination, PathEndpoint):
+class ConsoleServerPort(ModularComponentModel, CabledObjectModel, PathEndpoint, TrackingModelMixin):
     """
     A physical port within a Device (typically a designated console server) which provides access to ConsolePorts.
     """
     type = models.CharField(
+        verbose_name=_('type'),
         max_length=50,
         choices=ConsolePortTypeChoices,
         blank=True,
-        help_text='Physical port type'
+        help_text=_('Physical port type')
     )
     speed = models.PositiveIntegerField(
+        verbose_name=_('speed'),
         choices=ConsolePortSpeedChoices,
         blank=True,
         null=True,
-        help_text='Port speed in bits per second'
+        help_text=_('Port speed in bits per second')
     )
 
-    clone_fields = ['device', 'type', 'speed']
+    clone_fields = ('device', 'module', 'type', 'speed')
 
-    class Meta:
-        ordering = ('device', '_name')
-        unique_together = ('device', 'name')
+    class Meta(ModularComponentModel.Meta):
+        verbose_name = _('console server port')
+        verbose_name_plural = _('console server ports')
 
     def get_absolute_url(self):
         return reverse('dcim:consoleserverport', kwargs={'pk': self.pk})
@@ -307,34 +337,37 @@ class ConsoleServerPort(ModularComponentModel, LinkTermination, PathEndpoint):
 # Power components
 #
 
-class PowerPort(ModularComponentModel, LinkTermination, PathEndpoint):
+class PowerPort(ModularComponentModel, CabledObjectModel, PathEndpoint, TrackingModelMixin):
     """
     A physical power supply (intake) port within a Device. PowerPorts connect to PowerOutlets.
     """
     type = models.CharField(
+        verbose_name=_('type'),
         max_length=50,
         choices=PowerPortTypeChoices,
         blank=True,
-        help_text='Physical port type'
+        help_text=_('Physical port type')
     )
-    maximum_draw = models.PositiveSmallIntegerField(
+    maximum_draw = models.PositiveIntegerField(
+        verbose_name=_('maximum draw'),
         blank=True,
         null=True,
         validators=[MinValueValidator(1)],
-        help_text="Maximum power draw (watts)"
+        help_text=_("Maximum power draw (watts)")
     )
-    allocated_draw = models.PositiveSmallIntegerField(
+    allocated_draw = models.PositiveIntegerField(
+        verbose_name=_('allocated draw'),
         blank=True,
         null=True,
         validators=[MinValueValidator(1)],
-        help_text="Allocated power draw (watts)"
+        help_text=_('Allocated power draw (watts)')
     )
 
-    clone_fields = ['device', 'maximum_draw', 'allocated_draw']
+    clone_fields = ('device', 'module', 'maximum_draw', 'allocated_draw')
 
-    class Meta:
-        ordering = ('device', '_name')
-        unique_together = ('device', 'name')
+    class Meta(ModularComponentModel.Meta):
+        verbose_name = _('power port')
+        verbose_name_plural = _('power ports')
 
     def get_absolute_url(self):
         return reverse('dcim:powerport', kwargs={'pk': self.pk})
@@ -345,39 +378,62 @@ class PowerPort(ModularComponentModel, LinkTermination, PathEndpoint):
         if self.maximum_draw is not None and self.allocated_draw is not None:
             if self.allocated_draw > self.maximum_draw:
                 raise ValidationError({
-                    'allocated_draw': f"Allocated draw cannot exceed the maximum draw ({self.maximum_draw}W)."
+                    'allocated_draw': _(
+                        "Allocated draw cannot exceed the maximum draw ({maximum_draw}W)."
+                    ).format(maximum_draw=self.maximum_draw)
                 })
+
+    def get_downstream_powerports(self, leg=None):
+        """
+        Return a queryset of all PowerPorts connected via cable to a child PowerOutlet. For example, in the topology
+        below, PP1.get_downstream_powerports() would return PP2-4.
+
+               ---- PO1 <---> PP2
+             /
+        PP1 ------- PO2 <---> PP3
+             \
+               ---- PO3 <---> PP4
+
+        """
+        poweroutlets = self.poweroutlets.filter(cable__isnull=False)
+        if leg:
+            poweroutlets = poweroutlets.filter(feed_leg=leg)
+        if not poweroutlets:
+            return PowerPort.objects.none()
+
+        q = Q()
+        for poweroutlet in poweroutlets:
+            q |= Q(
+                cable=poweroutlet.cable,
+                cable_end=poweroutlet.opposite_cable_end
+            )
+
+        return PowerPort.objects.filter(q)
 
     def get_power_draw(self):
         """
         Return the allocated and maximum power draw (in VA) and child PowerOutlet count for this PowerPort.
         """
+        from dcim.models import PowerFeed
+
         # Calculate aggregate draw of all child power outlets if no numbers have been defined manually
         if self.allocated_draw is None and self.maximum_draw is None:
-            poweroutlet_ct = ContentType.objects.get_for_model(PowerOutlet)
-            outlet_ids = PowerOutlet.objects.filter(power_port=self).values_list('pk', flat=True)
-            utilization = PowerPort.objects.filter(
-                _link_peer_type=poweroutlet_ct,
-                _link_peer_id__in=outlet_ids
-            ).aggregate(
+            utilization = self.get_downstream_powerports().aggregate(
                 maximum_draw_total=Sum('maximum_draw'),
                 allocated_draw_total=Sum('allocated_draw'),
             )
             ret = {
                 'allocated': utilization['allocated_draw_total'] or 0,
                 'maximum': utilization['maximum_draw_total'] or 0,
-                'outlet_count': len(outlet_ids),
+                'outlet_count': self.poweroutlets.count(),
                 'legs': [],
             }
 
-            # Calculate per-leg aggregates for three-phase feeds
-            if getattr(self._link_peer, 'phase', None) == PowerFeedPhaseChoices.PHASE_3PHASE:
+            # Calculate per-leg aggregates for three-phase power feeds
+            if len(self.link_peers) == 1 and isinstance(self.link_peers[0], PowerFeed) and \
+                    self.link_peers[0].phase == PowerFeedPhaseChoices.PHASE_3PHASE:
                 for leg, leg_name in PowerOutletFeedLegChoices:
-                    outlet_ids = PowerOutlet.objects.filter(power_port=self, feed_leg=leg).values_list('pk', flat=True)
-                    utilization = PowerPort.objects.filter(
-                        _link_peer_type=poweroutlet_ct,
-                        _link_peer_id__in=outlet_ids
-                    ).aggregate(
+                    utilization = self.get_downstream_powerports(leg=leg).aggregate(
                         maximum_draw_total=Sum('maximum_draw'),
                         allocated_draw_total=Sum('allocated_draw'),
                     )
@@ -385,7 +441,7 @@ class PowerPort(ModularComponentModel, LinkTermination, PathEndpoint):
                         'name': leg_name,
                         'allocated': utilization['allocated_draw_total'] or 0,
                         'maximum': utilization['maximum_draw_total'] or 0,
-                        'outlet_count': len(outlet_ids),
+                        'outlet_count': self.poweroutlets.filter(feed_leg=leg).count(),
                     })
 
             return ret
@@ -394,20 +450,21 @@ class PowerPort(ModularComponentModel, LinkTermination, PathEndpoint):
         return {
             'allocated': self.allocated_draw or 0,
             'maximum': self.maximum_draw or 0,
-            'outlet_count': PowerOutlet.objects.filter(power_port=self).count(),
+            'outlet_count': self.poweroutlets.count(),
             'legs': [],
         }
 
 
-class PowerOutlet(ModularComponentModel, LinkTermination, PathEndpoint):
+class PowerOutlet(ModularComponentModel, CabledObjectModel, PathEndpoint, TrackingModelMixin):
     """
     A physical power outlet (output) within a Device which provides power to a PowerPort.
     """
     type = models.CharField(
+        verbose_name=_('type'),
         max_length=50,
         choices=PowerOutletTypeChoices,
         blank=True,
-        help_text='Physical port type'
+        help_text=_('Physical port type')
     )
     power_port = models.ForeignKey(
         to='dcim.PowerPort',
@@ -417,17 +474,18 @@ class PowerOutlet(ModularComponentModel, LinkTermination, PathEndpoint):
         related_name='poweroutlets'
     )
     feed_leg = models.CharField(
+        verbose_name=_('feed leg'),
         max_length=50,
         choices=PowerOutletFeedLegChoices,
         blank=True,
-        help_text="Phase (for three-phase feeds)"
+        help_text=_('Phase (for three-phase feeds)')
     )
 
-    clone_fields = ['device', 'type', 'power_port', 'feed_leg']
+    clone_fields = ('device', 'module', 'type', 'power_port', 'feed_leg')
 
-    class Meta:
-        ordering = ('device', '_name')
-        unique_together = ('device', 'name')
+    class Meta(ModularComponentModel.Meta):
+        verbose_name = _('power outlet')
+        verbose_name_plural = _('power outlets')
 
     def get_absolute_url(self):
         return reverse('dcim:poweroutlet', kwargs={'pk': self.pk})
@@ -438,7 +496,7 @@ class PowerOutlet(ModularComponentModel, LinkTermination, PathEndpoint):
         # Validate power port assignment
         if self.power_port and self.power_port.device != self.device:
             raise ValidationError(
-                "Parent power port ({}) must belong to the same device".format(self.power_port)
+                _("Parent power port ({power_port}) must belong to the same device").format(power_port=self.power_port)
             )
 
 
@@ -451,12 +509,13 @@ class BaseInterface(models.Model):
     Abstract base class for fields shared by dcim.Interface and virtualization.VMInterface.
     """
     enabled = models.BooleanField(
+        verbose_name=_('enabled'),
         default=True
     )
     mac_address = MACAddressField(
         null=True,
         blank=True,
-        verbose_name='MAC Address'
+        verbose_name=_('MAC address')
     )
     mtu = models.PositiveIntegerField(
         blank=True,
@@ -465,20 +524,22 @@ class BaseInterface(models.Model):
             MinValueValidator(INTERFACE_MTU_MIN),
             MaxValueValidator(INTERFACE_MTU_MAX)
         ],
-        verbose_name='MTU'
+        verbose_name=_('MTU')
     )
     mode = models.CharField(
+        verbose_name=_('mode'),
         max_length=50,
         choices=InterfaceModeChoices,
-        blank=True
+        blank=True,
+        help_text=_('IEEE 802.1Q tagging strategy')
     )
     parent = models.ForeignKey(
         to='self',
-        on_delete=models.SET_NULL,
+        on_delete=models.RESTRICT,
         related_name='child_interfaces',
         null=True,
         blank=True,
-        verbose_name='Parent interface'
+        verbose_name=_('parent interface')
     )
     bridge = models.ForeignKey(
         to='self',
@@ -486,7 +547,7 @@ class BaseInterface(models.Model):
         related_name='bridge_interfaces',
         null=True,
         blank=True,
-        verbose_name='Bridge interface'
+        verbose_name=_('bridge interface')
     )
 
     class Meta:
@@ -499,10 +560,14 @@ class BaseInterface(models.Model):
             self.untagged_vlan = None
 
         # Only "tagged" interfaces may have tagged VLANs assigned. ("tagged all" implies all VLANs are assigned.)
-        if self.pk and self.mode != InterfaceModeChoices.MODE_TAGGED:
+        if not self._state.adding and self.mode != InterfaceModeChoices.MODE_TAGGED:
             self.tagged_vlans.clear()
 
         return super().save(*args, **kwargs)
+
+    @property
+    def tunnel_termination(self):
+        return self.tunnel_terminations.first()
 
     @property
     def count_ipaddresses(self):
@@ -513,7 +578,7 @@ class BaseInterface(models.Model):
         return self.fhrp_group_assignments.count()
 
 
-class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpoint):
+class Interface(ModularComponentModel, BaseInterface, CabledObjectModel, PathEndpoint, TrackingModelMixin):
     """
     A network interface within a Device. A physical Interface can connect to exactly one other Interface.
     """
@@ -524,29 +589,35 @@ class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpo
         max_length=100,
         blank=True
     )
+    vdcs = models.ManyToManyField(
+        to='dcim.VirtualDeviceContext',
+        related_name='interfaces'
+    )
     lag = models.ForeignKey(
         to='self',
         on_delete=models.SET_NULL,
         related_name='member_interfaces',
         null=True,
         blank=True,
-        verbose_name='Parent LAG'
+        verbose_name=_('parent LAG')
     )
     type = models.CharField(
+        verbose_name=_('type'),
         max_length=50,
         choices=InterfaceTypeChoices
     )
     mgmt_only = models.BooleanField(
         default=False,
-        verbose_name='Management only',
-        help_text='This interface is used only for out-of-band management'
+        verbose_name=_('management only'),
+        help_text=_('This interface is used only for out-of-band management')
     )
     speed = models.PositiveIntegerField(
         blank=True,
         null=True,
-        verbose_name='Speed (Kbps)'
+        verbose_name=_('speed (Kbps)')
     )
     duplex = models.CharField(
+        verbose_name=_('duplex'),
         max_length=50,
         blank=True,
         null=True,
@@ -555,40 +626,54 @@ class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpo
     wwn = WWNField(
         null=True,
         blank=True,
-        verbose_name='WWN',
-        help_text='64-bit World Wide Name'
+        verbose_name=_('WWN'),
+        help_text=_('64-bit World Wide Name')
     )
     rf_role = models.CharField(
         max_length=30,
         choices=WirelessRoleChoices,
         blank=True,
-        verbose_name='Wireless role'
+        verbose_name=_('wireless role')
     )
     rf_channel = models.CharField(
         max_length=50,
         choices=WirelessChannelChoices,
         blank=True,
-        verbose_name='Wireless channel'
+        verbose_name=_('wireless channel')
     )
     rf_channel_frequency = models.DecimalField(
         max_digits=7,
         decimal_places=2,
         blank=True,
         null=True,
-        verbose_name='Channel frequency (MHz)'
+        verbose_name=_('channel frequency (MHz)'),
+        help_text=_("Populated by selected channel (if set)")
     )
     rf_channel_width = models.DecimalField(
         max_digits=7,
         decimal_places=3,
         blank=True,
         null=True,
-        verbose_name='Channel width (MHz)'
+        verbose_name=('channel width (MHz)'),
+        help_text=_("Populated by selected channel (if set)")
     )
     tx_power = models.PositiveSmallIntegerField(
         blank=True,
         null=True,
         validators=(MaxValueValidator(127),),
-        verbose_name='Transmit power (dBm)'
+        verbose_name=_('transmit power (dBm)')
+    )
+    poe_mode = models.CharField(
+        max_length=50,
+        choices=InterfacePoEModeChoices,
+        blank=True,
+        verbose_name=_('PoE mode')
+    )
+    poe_type = models.CharField(
+        max_length=50,
+        choices=InterfacePoETypeChoices,
+        blank=True,
+        verbose_name=_('PoE type')
     )
     wireless_link = models.ForeignKey(
         to='wireless.WirelessLink',
@@ -601,7 +686,7 @@ class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpo
         to='wireless.WirelessLAN',
         related_name='interfaces',
         blank=True,
-        verbose_name='Wireless LANs'
+        verbose_name=_('wireless LANs')
     )
     untagged_vlan = models.ForeignKey(
         to='ipam.VLAN',
@@ -609,13 +694,13 @@ class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpo
         related_name='interfaces_as_untagged',
         null=True,
         blank=True,
-        verbose_name='Untagged VLAN'
+        verbose_name=_('untagged VLAN')
     )
     tagged_vlans = models.ManyToManyField(
         to='ipam.VLAN',
         related_name='interfaces_as_tagged',
         blank=True,
-        verbose_name='Tagged VLANs'
+        verbose_name=_('tagged VLANs')
     )
     vrf = models.ForeignKey(
         to='ipam.VRF',
@@ -623,7 +708,7 @@ class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpo
         related_name='interfaces',
         null=True,
         blank=True,
-        verbose_name='VRF'
+        verbose_name=_('VRF')
     )
     ip_addresses = GenericRelation(
         to='ipam.IPAddress',
@@ -637,12 +722,28 @@ class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpo
         object_id_field='interface_id',
         related_query_name='+'
     )
+    tunnel_terminations = GenericRelation(
+        to='vpn.TunnelTermination',
+        content_type_field='termination_type',
+        object_id_field='termination_id',
+        related_query_name='interface'
+    )
+    l2vpn_terminations = GenericRelation(
+        to='vpn.L2VPNTermination',
+        content_type_field='assigned_object_type',
+        object_id_field='assigned_object_id',
+        related_query_name='interface',
+    )
 
-    clone_fields = ['device', 'parent', 'bridge', 'lag', 'type', 'mgmt_only']
+    clone_fields = (
+        'device', 'module', 'parent', 'bridge', 'lag', 'type', 'mgmt_only', 'mtu', 'mode', 'speed', 'duplex', 'rf_role',
+        'rf_channel', 'rf_channel_frequency', 'rf_channel_width', 'tx_power', 'poe_mode', 'poe_type', 'vrf',
+    )
 
-    class Meta:
+    class Meta(ModularComponentModel.Meta):
         ordering = ('device', CollateAsChar('_name'))
-        unique_together = ('device', 'name')
+        verbose_name = _('interface')
+        verbose_name_plural = _('interfaces')
 
     def get_absolute_url(self):
         return reverse('dcim:interface', kwargs={'pk': self.pk})
@@ -653,117 +754,164 @@ class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpo
         # Virtual Interfaces cannot have a Cable attached
         if self.is_virtual and self.cable:
             raise ValidationError({
-                'type': f"{self.get_type_display()} interfaces cannot have a cable attached."
+                'type': _("{display_type} interfaces cannot have a cable attached.").format(
+                    display_type=self.get_type_display()
+                )
             })
 
         # Virtual Interfaces cannot be marked as connected
         if self.is_virtual and self.mark_connected:
             raise ValidationError({
-                'mark_connected': f"{self.get_type_display()} interfaces cannot be marked as connected."
+                'mark_connected': _("{display_type} interfaces cannot be marked as connected.".format(
+                    display_type=self.get_type_display())
+                )
             })
 
         # Parent validation
 
         # An interface cannot be its own parent
         if self.pk and self.parent_id == self.pk:
-            raise ValidationError({'parent': "An interface cannot be its own parent."})
+            raise ValidationError({'parent': _("An interface cannot be its own parent.")})
 
         # A physical interface cannot have a parent interface
         if self.type != InterfaceTypeChoices.TYPE_VIRTUAL and self.parent is not None:
-            raise ValidationError({'parent': "Only virtual interfaces may be assigned to a parent interface."})
+            raise ValidationError({'parent': _("Only virtual interfaces may be assigned to a parent interface.")})
 
         # An interface's parent must belong to the same device or virtual chassis
         if self.parent and self.parent.device != self.device:
             if self.device.virtual_chassis is None:
                 raise ValidationError({
-                    'parent': f"The selected parent interface ({self.parent}) belongs to a different device "
-                              f"({self.parent.device})."
+                    'parent': _(
+                        "The selected parent interface ({interface}) belongs to a different device ({device})"
+                    ).format(interface=self.parent, device=self.parent.device)
                 })
             elif self.parent.device.virtual_chassis != self.parent.virtual_chassis:
                 raise ValidationError({
-                    'parent': f"The selected parent interface ({self.parent}) belongs to {self.parent.device}, which "
-                              f"is not part of virtual chassis {self.device.virtual_chassis}."
+                    'parent': _(
+                        "The selected parent interface ({interface}) belongs to {device}, which is not part of "
+                        "virtual chassis {virtual_chassis}."
+                    ).format(
+                        interface=self.parent,
+                        device=self.parent_device,
+                        virtual_chassis=self.device.virtual_chassis
+                    )
                 })
 
         # Bridge validation
 
         # An interface cannot be bridged to itself
         if self.pk and self.bridge_id == self.pk:
-            raise ValidationError({'bridge': "An interface cannot be bridged to itself."})
+            raise ValidationError({'bridge': _("An interface cannot be bridged to itself.")})
 
         # A bridged interface belong to the same device or virtual chassis
         if self.bridge and self.bridge.device != self.device:
             if self.device.virtual_chassis is None:
                 raise ValidationError({
-                    'bridge': f"The selected bridge interface ({self.bridge}) belongs to a different device "
-                              f"({self.bridge.device})."
+                    'bridge': _(
+                        "The selected bridge interface ({bridge}) belongs to a different device ({device})."
+                    ).format(bridge=self.bridge, device=self.bridge.device)
                 })
             elif self.bridge.device.virtual_chassis != self.device.virtual_chassis:
                 raise ValidationError({
-                    'bridge': f"The selected bridge interface ({self.bridge}) belongs to {self.bridge.device}, which "
-                              f"is not part of virtual chassis {self.device.virtual_chassis}."
+                    'bridge': _(
+                        "The selected bridge interface ({interface}) belongs to {device}, which is not part of virtual "
+                        "chassis {virtual_chassis}."
+                    ).format(
+                        interface=self.bridge, device=self.bridge.device, virtual_chassis=self.device.virtual_chassis
+                    )
                 })
 
         # LAG validation
 
         # A virtual interface cannot have a parent LAG
         if self.type == InterfaceTypeChoices.TYPE_VIRTUAL and self.lag is not None:
-            raise ValidationError({'lag': "Virtual interfaces cannot have a parent LAG interface."})
+            raise ValidationError({'lag': _("Virtual interfaces cannot have a parent LAG interface.")})
 
         # A LAG interface cannot be its own parent
         if self.pk and self.lag_id == self.pk:
-            raise ValidationError({'lag': "A LAG interface cannot be its own parent."})
+            raise ValidationError({'lag': _("A LAG interface cannot be its own parent.")})
 
         # An interface's LAG must belong to the same device or virtual chassis
         if self.lag and self.lag.device != self.device:
             if self.device.virtual_chassis is None:
                 raise ValidationError({
-                    'lag': f"The selected LAG interface ({self.lag}) belongs to a different device ({self.lag.device})."
+                    'lag': _(
+                        "The selected LAG interface ({lag}) belongs to a different device ({device})."
+                    ).format(lag=self.lag, device=self.lag.device)
                 })
             elif self.lag.device.virtual_chassis != self.device.virtual_chassis:
                 raise ValidationError({
-                    'lag': f"The selected LAG interface ({self.lag}) belongs to {self.lag.device}, which is not part "
-                           f"of virtual chassis {self.device.virtual_chassis}."
+                    'lag': _(
+                        "The selected LAG interface ({lag}) belongs to {device}, which is not part of virtual chassis "
+                        "{virtual_chassis}.".format(
+                            lag=self.lag, device=self.lag.device, virtual_chassis=self.device.virtual_chassis)
+                    )
                 })
+
+        # PoE validation
+
+        # Only physical interfaces may have a PoE mode/type assigned
+        if self.poe_mode and self.is_virtual:
+            raise ValidationError({
+                'poe_mode': _("Virtual interfaces cannot have a PoE mode.")
+            })
+        if self.poe_type and self.is_virtual:
+            raise ValidationError({
+                'poe_type': _("Virtual interfaces cannot have a PoE type.")
+            })
+
+        # An interface with a PoE type set must also specify a mode
+        if self.poe_type and not self.poe_mode:
+            raise ValidationError({
+                'poe_type': _("Must specify PoE mode when designating a PoE type.")
+            })
 
         # Wireless validation
 
         # RF role & channel may only be set for wireless interfaces
         if self.rf_role and not self.is_wireless:
-            raise ValidationError({'rf_role': "Wireless role may be set only on wireless interfaces."})
+            raise ValidationError({'rf_role': _("Wireless role may be set only on wireless interfaces.")})
         if self.rf_channel and not self.is_wireless:
-            raise ValidationError({'rf_channel': "Channel may be set only on wireless interfaces."})
+            raise ValidationError({'rf_channel': _("Channel may be set only on wireless interfaces.")})
 
         # Validate channel frequency against interface type and selected channel (if any)
         if self.rf_channel_frequency:
             if not self.is_wireless:
                 raise ValidationError({
-                    'rf_channel_frequency': "Channel frequency may be set only on wireless interfaces.",
+                    'rf_channel_frequency': _("Channel frequency may be set only on wireless interfaces."),
                 })
             if self.rf_channel and self.rf_channel_frequency != get_channel_attr(self.rf_channel, 'frequency'):
                 raise ValidationError({
-                    'rf_channel_frequency': "Cannot specify custom frequency with channel selected.",
+                    'rf_channel_frequency': _("Cannot specify custom frequency with channel selected."),
                 })
-        elif self.rf_channel:
-            self.rf_channel_frequency = get_channel_attr(self.rf_channel, 'frequency')
 
         # Validate channel width against interface type and selected channel (if any)
         if self.rf_channel_width:
             if not self.is_wireless:
-                raise ValidationError({'rf_channel_width': "Channel width may be set only on wireless interfaces."})
+                raise ValidationError({'rf_channel_width': _("Channel width may be set only on wireless interfaces.")})
             if self.rf_channel and self.rf_channel_width != get_channel_attr(self.rf_channel, 'width'):
-                raise ValidationError({'rf_channel_width': "Cannot specify custom width with channel selected."})
-        elif self.rf_channel:
-            self.rf_channel_width = get_channel_attr(self.rf_channel, 'width')
+                raise ValidationError({'rf_channel_width': _("Cannot specify custom width with channel selected.")})
 
         # VLAN validation
 
         # Validate untagged VLAN
         if self.untagged_vlan and self.untagged_vlan.site not in [self.device.site, None]:
             raise ValidationError({
-                'untagged_vlan': f"The untagged VLAN ({self.untagged_vlan}) must belong to the same site as the "
-                                 f"interface's parent device, or it must be global."
+                'untagged_vlan': _(
+                    "The untagged VLAN ({untagged_vlan}) must belong to the same site as the interface's parent "
+                    "device, or it must be global."
+                ).format(untagged_vlan=self.untagged_vlan)
             })
+
+    def save(self, *args, **kwargs):
+
+        # Set absolute channel attributes from selected options
+        if self.rf_channel and not self.rf_channel_frequency:
+            self.rf_channel_frequency = get_channel_attr(self.rf_channel, 'frequency')
+        if self.rf_channel and not self.rf_channel_width:
+            self.rf_channel_width = get_channel_attr(self.rf_channel, 'width')
+
+        super().save(*args, **kwargs)
 
     @property
     def _occupied(self):
@@ -793,20 +941,38 @@ class Interface(ModularComponentModel, BaseInterface, LinkTermination, PathEndpo
     def link(self):
         return self.cable or self.wireless_link
 
+    @cached_property
+    def link_peers(self):
+        if self.cable:
+            return super().link_peers
+        if self.wireless_link:
+            # Return the opposite side of the attached wireless link
+            if self.wireless_link.interface_a == self:
+                return [self.wireless_link.interface_b]
+            else:
+                return [self.wireless_link.interface_a]
+        return []
+
+    @property
+    def l2vpn_termination(self):
+        return self.l2vpn_terminations.first()
+
 
 #
 # Pass-through ports
 #
 
-class FrontPort(ModularComponentModel, LinkTermination):
+class FrontPort(ModularComponentModel, CabledObjectModel, TrackingModelMixin):
     """
     A pass-through port on the front of a Device.
     """
     type = models.CharField(
+        verbose_name=_('type'),
         max_length=50,
         choices=PortTypeChoices
     )
     color = ColorField(
+        verbose_name=_('color'),
         blank=True
     )
     rear_port = models.ForeignKey(
@@ -815,21 +981,30 @@ class FrontPort(ModularComponentModel, LinkTermination):
         related_name='frontports'
     )
     rear_port_position = models.PositiveSmallIntegerField(
+        verbose_name=_('rear port position'),
         default=1,
         validators=[
             MinValueValidator(REARPORT_POSITIONS_MIN),
             MaxValueValidator(REARPORT_POSITIONS_MAX)
-        ]
+        ],
+        help_text=_('Mapped position on corresponding rear port')
     )
 
-    clone_fields = ['device', 'type']
+    clone_fields = ('device', 'type', 'color')
 
-    class Meta:
-        ordering = ('device', '_name')
-        unique_together = (
-            ('device', 'name'),
-            ('rear_port', 'rear_port_position'),
+    class Meta(ModularComponentModel.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('device', 'name'),
+                name='%(app_label)s_%(class)s_unique_device_name'
+            ),
+            models.UniqueConstraint(
+                fields=('rear_port', 'rear_port_position'),
+                name='%(app_label)s_%(class)s_unique_rear_port_position'
+            ),
         )
+        verbose_name = _('front port')
+        verbose_name_plural = _('front ports')
 
     def get_absolute_url(self):
         return reverse('dcim:frontport', kwargs={'pk': self.pk})
@@ -837,43 +1012,57 @@ class FrontPort(ModularComponentModel, LinkTermination):
     def clean(self):
         super().clean()
 
-        # Validate rear port assignment
-        if self.rear_port.device != self.device:
-            raise ValidationError({
-                "rear_port": f"Rear port ({self.rear_port}) must belong to the same device"
-            })
+        if hasattr(self, 'rear_port'):
 
-        # Validate rear port position assignment
-        if self.rear_port_position > self.rear_port.positions:
-            raise ValidationError({
-                "rear_port_position": f"Invalid rear port position ({self.rear_port_position}): Rear port "
-                                      f"{self.rear_port.name} has only {self.rear_port.positions} positions"
-            })
+            # Validate rear port assignment
+            if self.rear_port.device != self.device:
+                raise ValidationError({
+                    "rear_port": _(
+                        "Rear port ({rear_port}) must belong to the same device"
+                    ).format(rear_port=self.rear_port)
+                })
+
+            # Validate rear port position assignment
+            if self.rear_port_position > self.rear_port.positions:
+                raise ValidationError({
+                    "rear_port_position": _(
+                        "Invalid rear port position ({rear_port_position}): Rear port {name} has only {positions} "
+                        "positions."
+                    ).format(
+                        rear_port_position=self.rear_port_position,
+                        name=self.rear_port.name,
+                        positions=self.rear_port.positions
+                    )
+                })
 
 
-class RearPort(ModularComponentModel, LinkTermination):
+class RearPort(ModularComponentModel, CabledObjectModel, TrackingModelMixin):
     """
     A pass-through port on the rear of a Device.
     """
     type = models.CharField(
+        verbose_name=_('type'),
         max_length=50,
         choices=PortTypeChoices
     )
     color = ColorField(
+        verbose_name=_('color'),
         blank=True
     )
     positions = models.PositiveSmallIntegerField(
+        verbose_name=_('positions'),
         default=1,
         validators=[
             MinValueValidator(REARPORT_POSITIONS_MIN),
             MaxValueValidator(REARPORT_POSITIONS_MAX)
-        ]
+        ],
+        help_text=_('Number of front ports which may be mapped')
     )
-    clone_fields = ['device', 'type', 'positions']
+    clone_fields = ('device', 'type', 'color', 'positions')
 
-    class Meta:
-        ordering = ('device', '_name')
-        unique_together = ('device', 'name')
+    class Meta(ModularComponentModel.Meta):
+        verbose_name = _('rear port')
+        verbose_name_plural = _('rear ports')
 
     def get_absolute_url(self):
         return reverse('dcim:rearport', kwargs={'pk': self.pk})
@@ -882,39 +1071,82 @@ class RearPort(ModularComponentModel, LinkTermination):
         super().clean()
 
         # Check that positions count is greater than or equal to the number of associated FrontPorts
-        frontport_count = self.frontports.count()
-        if self.positions < frontport_count:
-            raise ValidationError({
-                "positions": f"The number of positions cannot be less than the number of mapped front ports "
-                             f"({frontport_count})"
-            })
+        if not self._state.adding:
+            frontport_count = self.frontports.count()
+            if self.positions < frontport_count:
+                raise ValidationError({
+                    "positions": _(
+                        "The number of positions cannot be less than the number of mapped front ports "
+                        "({frontport_count})"
+                    ).format(frontport_count=frontport_count)
+                })
 
 
 #
 # Bays
 #
 
-class ModuleBay(ComponentModel):
+class ModuleBay(ModularComponentModel, TrackingModelMixin, MPTTModel):
     """
     An empty space within a Device which can house a child device
     """
+    parent = TreeForeignKey(
+        to='self',
+        on_delete=models.CASCADE,
+        related_name='children',
+        blank=True,
+        null=True,
+        editable=False,
+        db_index=True
+    )
     position = models.CharField(
+        verbose_name=_('position'),
         max_length=30,
         blank=True,
-        help_text='Identifier to reference when renaming installed components'
+        help_text=_('Identifier to reference when renaming installed components')
     )
 
-    clone_fields = ['device']
+    objects = TreeManager()
 
-    class Meta:
-        ordering = ('device', '_name')
-        unique_together = ('device', 'name')
+    clone_fields = ('device',)
+
+    class Meta(ModularComponentModel.Meta):
+        constraints = (
+            models.UniqueConstraint(
+                fields=('device', 'module', 'name'),
+                name='%(app_label)s_%(class)s_unique_device_module_name'
+            ),
+        )
+        verbose_name = _('module bay')
+        verbose_name_plural = _('module bays')
+
+    class MPTTMeta:
+        order_insertion_by = ('module',)
 
     def get_absolute_url(self):
         return reverse('dcim:modulebay', kwargs={'pk': self.pk})
 
+    def clean(self):
+        super().clean()
 
-class DeviceBay(ComponentModel):
+        # Check for recursion
+        if module := self.module:
+            module_bays = [self.pk]
+            modules = []
+            while module:
+                if module.pk in modules or module.module_bay.pk in module_bays:
+                    raise ValidationError(_("A module bay cannot belong to a module installed within it."))
+                modules.append(module.pk)
+                module_bays.append(module.module_bay.pk)
+                module = module.module_bay.module if module.module_bay else None
+
+    def save(self, *args, **kwargs):
+        if self.module:
+            self.parent = self.module.module_bay
+        super().save(*args, **kwargs)
+
+
+class DeviceBay(ComponentModel, TrackingModelMixin):
     """
     An empty space within a Device which can house a child device
     """
@@ -926,11 +1158,11 @@ class DeviceBay(ComponentModel):
         null=True
     )
 
-    clone_fields = ['device']
+    clone_fields = ('device',)
 
-    class Meta:
-        ordering = ('device', '_name')
-        unique_together = ('device', 'name')
+    class Meta(ComponentModel.Meta):
+        verbose_name = _('device bay')
+        verbose_name_plural = _('device bays')
 
     def get_absolute_url(self):
         return reverse('dcim:devicebay', kwargs={'pk': self.pk})
@@ -939,23 +1171,23 @@ class DeviceBay(ComponentModel):
         super().clean()
 
         # Validate that the parent Device can have DeviceBays
-        if not self.device.device_type.is_parent_device:
-            raise ValidationError("This type of device ({}) does not support device bays.".format(
-                self.device.device_type
+        if hasattr(self, 'device') and not self.device.device_type.is_parent_device:
+            raise ValidationError(_("This type of device ({device_type}) does not support device bays.").format(
+                device_type=self.device.device_type
             ))
 
         # Cannot install a device into itself, obviously
-        if self.device == self.installed_device:
-            raise ValidationError("Cannot install a device into itself.")
+        if self.installed_device and getattr(self, 'device', None) == self.installed_device:
+            raise ValidationError(_("Cannot install a device into itself."))
 
         # Check that the installed device is not already installed elsewhere
         if self.installed_device:
             current_bay = DeviceBay.objects.filter(installed_device=self.installed_device).first()
             if current_bay and current_bay != self:
                 raise ValidationError({
-                    'installed_device': "Cannot install the specified device; device is already installed in {}".format(
-                        current_bay
-                    )
+                    'installed_device': _(
+                        "Cannot install the specified device; device is already installed in {bay}."
+                    ).format(bay=current_bay)
                 })
 
 
@@ -968,33 +1200,21 @@ class InventoryItemRole(OrganizationalModel):
     """
     Inventory items may optionally be assigned a functional role.
     """
-    name = models.CharField(
-        max_length=100,
-        unique=True
-    )
-    slug = models.SlugField(
-        max_length=100,
-        unique=True
-    )
     color = ColorField(
+        verbose_name=_('color'),
         default=ColorChoices.COLOR_GREY
-    )
-    description = models.CharField(
-        max_length=200,
-        blank=True,
     )
 
     class Meta:
-        ordering = ['name']
-
-    def __str__(self):
-        return self.name
+        ordering = ('name',)
+        verbose_name = _('inventory item role')
+        verbose_name_plural = _('inventory item roles')
 
     def get_absolute_url(self):
         return reverse('dcim:inventoryitemrole', args=[self.pk])
 
 
-class InventoryItem(MPTTModel, ComponentModel):
+class InventoryItem(MPTTModel, ComponentModel, TrackingModelMixin):
     """
     An InventoryItem represents a serialized piece of hardware within a Device, such as a line card or power supply.
     InventoryItems are used only for inventory purposes.
@@ -1008,7 +1228,7 @@ class InventoryItem(MPTTModel, ComponentModel):
         db_index=True
     )
     component_type = models.ForeignKey(
-        to=ContentType,
+        to='contenttypes.ContentType',
         limit_choices_to=MODULAR_COMPONENT_MODELS,
         on_delete=models.PROTECT,
         related_name='+',
@@ -1039,13 +1259,13 @@ class InventoryItem(MPTTModel, ComponentModel):
     )
     part_id = models.CharField(
         max_length=50,
-        verbose_name='Part ID',
+        verbose_name=_('part ID'),
         blank=True,
-        help_text='Manufacturer-assigned part identifier'
+        help_text=_('Manufacturer-assigned part identifier')
     )
     serial = models.CharField(
         max_length=50,
-        verbose_name='Serial number',
+        verbose_name=_('serial number'),
         blank=True
     )
     asset_tag = models.CharField(
@@ -1053,21 +1273,32 @@ class InventoryItem(MPTTModel, ComponentModel):
         unique=True,
         blank=True,
         null=True,
-        verbose_name='Asset tag',
-        help_text='A unique tag used to identify this item'
+        verbose_name=_('asset tag'),
+        help_text=_('A unique tag used to identify this item')
     )
     discovered = models.BooleanField(
+        verbose_name=_('discovered'),
         default=False,
-        help_text='This item was automatically discovered'
+        help_text=_('This item was automatically discovered')
     )
 
     objects = TreeManager()
 
-    clone_fields = ['device', 'parent', 'role', 'manufacturer', 'part_id']
+    clone_fields = ('device', 'parent', 'role', 'manufacturer', 'part_id',)
 
     class Meta:
         ordering = ('device__id', 'parent__id', '_name')
-        unique_together = ('device', 'parent', 'name')
+        indexes = (
+            models.Index(fields=('component_type', 'component_id')),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=('device', 'parent', 'name'),
+                name='%(app_label)s_%(class)s_unique_device_parent_name'
+            ),
+        )
+        verbose_name = _('inventory item')
+        verbose_name_plural = _('inventory items')
 
     def get_absolute_url(self):
         return reverse('dcim:inventoryitem', kwargs={'pk': self.pk})
@@ -1078,5 +1309,27 @@ class InventoryItem(MPTTModel, ComponentModel):
         # An InventoryItem cannot be its own parent
         if self.pk and self.parent_id == self.pk:
             raise ValidationError({
-                "parent": "Cannot assign self as parent."
+                "parent": _("Cannot assign self as parent.")
             })
+
+        # Validation for moving InventoryItems
+        if not self._state.adding:
+            # Cannot move an InventoryItem to another device if it has a parent
+            if self.parent and self.parent.device != self.device:
+                raise ValidationError({
+                    "parent": _("Parent inventory item does not belong to the same device.")
+                })
+
+            # Prevent moving InventoryItems with children
+            first_child = self.get_children().first()
+            if first_child and first_child.device != self.device:
+                raise ValidationError(_("Cannot move an inventory item with dependent children"))
+
+            # When moving an InventoryItem to another device, remove any associated component
+            if self.component and self.component.device != self.device:
+                self.component = None
+        else:
+            if self.component and self.component.device != self.device:
+                raise ValidationError({
+                    "device": _("Cannot assign inventory item to component on another device")
+                })

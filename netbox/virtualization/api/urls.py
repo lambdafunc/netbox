@@ -1,4 +1,4 @@
-from netbox.api import NetBoxRouter
+from netbox.api.routers import NetBoxRouter
 from . import views
 
 
@@ -13,6 +13,7 @@ router.register('clusters', views.ClusterViewSet)
 # VirtualMachines
 router.register('virtual-machines', views.VirtualMachineViewSet)
 router.register('interfaces', views.VMInterfaceViewSet)
+router.register('virtual-disks', views.VirtualDiskViewSet)
 
 app_name = 'virtualization-api'
 urlpatterns = router.urls

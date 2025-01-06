@@ -4,6 +4,14 @@ The configuration parameters listed here control remote authentication for NetBo
 
 ---
 
+## REMOTE_AUTH_AUTO_CREATE_GROUPS
+
+Default: `False`
+
+If true, NetBox will automatically create groups specified in the `REMOTE_AUTH_GROUP_HEADER` header if they don't already exist. (Requires `REMOTE_AUTH_ENABLED`.)
+
+---
+
 ## REMOTE_AUTH_AUTO_CREATE_USER
 
 Default: `False`
@@ -16,7 +24,7 @@ If true, NetBox will automatically create local accounts for users authenticated
 
 Default: `'netbox.authentication.RemoteUserBackend'`
 
-This is the Python path to the custom [Django authentication backend](https://docs.djangoproject.com/en/stable/topics/auth/customizing/) to use for external user authentication. NetBox provides two built-in backends (listed below), though custom authentication backends may also be provided by other packages or plugins.
+This is the Python path to the custom [Django authentication backend](https://docs.djangoproject.com/en/stable/topics/auth/customizing/) to use for external user authentication. NetBox provides two built-in backends (listed below), though custom authentication backends may also be provided by other packages or plugins. Provide a string for a single backend, or an iterable for multiple backends, which will be attempted in the order given.
 
 * `netbox.authentication.RemoteUserBackend`
 * `netbox.authentication.LDAPBackend`
@@ -47,6 +55,22 @@ NetBox can be configured to support remote user authentication by inferring user
 
 ---
 
+## REMOTE_AUTH_GROUP_HEADER
+
+Default: `'HTTP_REMOTE_USER_GROUP'`
+
+When remote user authentication is in use, this is the name of the HTTP header which informs NetBox of the currently authenticated user. For example, to use the request header `X-Remote-User-Groups` it needs to be set to `HTTP_X_REMOTE_USER_GROUPS`. (Requires `REMOTE_AUTH_ENABLED` and `REMOTE_AUTH_GROUP_SYNC_ENABLED` )
+
+---
+
+## REMOTE_AUTH_GROUP_SEPARATOR
+
+Default: `|` (Pipe)
+
+The Separator upon which `REMOTE_AUTH_GROUP_HEADER` gets split into individual Groups. This needs to be coordinated with your authentication Proxy. (Requires `REMOTE_AUTH_ENABLED` and `REMOTE_AUTH_GROUP_SYNC_ENABLED` )
+
+---
+
 ## REMOTE_AUTH_GROUP_SYNC_ENABLED
 
 Default: `False`
@@ -61,13 +85,32 @@ Default: `'HTTP_REMOTE_USER'`
 
 When remote user authentication is in use, this is the name of the HTTP header which informs NetBox of the currently authenticated user. For example, to use the request header `X-Remote-User` it needs to be set to `HTTP_X_REMOTE_USER`. (Requires `REMOTE_AUTH_ENABLED`.)
 
+!!! warning Verify Header Compatibility
+    Some WSGI servers may drop headers which contain unsupported characters. For instance, gunicorn v22.0 and later silently drops HTTP headers containing underscores. This behavior can be disabled by changing gunicorn's [`header_map`](https://docs.gunicorn.org/en/stable/settings.html#header-map) setting to `dangerous`.
+
 ---
 
-## REMOTE_AUTH_GROUP_HEADER
+## REMOTE_AUTH_USER_EMAIL
 
-Default: `'HTTP_REMOTE_USER_GROUP'`
+Default: `'HTTP_REMOTE_USER_EMAIL'`
 
-When remote user authentication is in use, this is the name of the HTTP header which informs NetBox of the currently authenticated user. For example, to use the request header `X-Remote-User-Groups` it needs to be set to `HTTP_X_REMOTE_USER_GROUPS`. (Requires `REMOTE_AUTH_ENABLED` and `REMOTE_AUTH_GROUP_SYNC_ENABLED` )
+When remote user authentication is in use, this is the name of the HTTP header which informs NetBox of the email address of the currently authenticated user. For example, to use the request header `X-Remote-User-Email` it needs to be set to `HTTP_X_REMOTE_USER_EMAIL`. (Requires `REMOTE_AUTH_ENABLED`.)
+
+---
+
+## REMOTE_AUTH_USER_FIRST_NAME
+
+Default: `'HTTP_REMOTE_USER_FIRST_NAME'`
+
+When remote user authentication is in use, this is the name of the HTTP header which informs NetBox of the first name of the currently authenticated user. For example, to use the request header `X-Remote-User-First-Name` it needs to be set to `HTTP_X_REMOTE_USER_FIRST_NAME`. (Requires `REMOTE_AUTH_ENABLED`.)
+
+---
+
+## REMOTE_AUTH_USER_LAST_NAME
+
+Default: `'HTTP_REMOTE_USER_LAST_NAME'`
+
+When remote user authentication is in use, this is the name of the HTTP header which informs NetBox of the last name of the currently authenticated user. For example, to use the request header `X-Remote-User-Last-Name` it needs to be set to `HTTP_X_REMOTE_USER_LAST_NAME`. (Requires `REMOTE_AUTH_ENABLED`.)
 
 ---
 
@@ -100,11 +143,3 @@ The list of groups that promote an remote User to Staff on Login. If group isn't
 Default: `[]` (Empty list)
 
 The list of users that get promoted to Staff on Login. If user isn't present in list on next Login, the Role gets revoked. (Requires `REMOTE_AUTH_ENABLED` and `REMOTE_AUTH_GROUP_SYNC_ENABLED` )
-
----
-
-## REMOTE_AUTH_GROUP_SEPARATOR
-
-Default: `|` (Pipe)
-
-The Seperator upon which `REMOTE_AUTH_GROUP_HEADER` gets split into individual Groups. This needs to be coordinated with your authentication Proxy. (Requires `REMOTE_AUTH_ENABLED` and `REMOTE_AUTH_GROUP_SYNC_ENABLED` )

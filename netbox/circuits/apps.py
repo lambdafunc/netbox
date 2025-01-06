@@ -6,4 +6,8 @@ class CircuitsConfig(AppConfig):
     verbose_name = "Circuits"
 
     def ready(self):
-        import circuits.signals
+        from netbox.models.features import register_models
+        from . import signals, search  # noqa: F401
+
+        # Register models
+        register_models(*self.get_models())

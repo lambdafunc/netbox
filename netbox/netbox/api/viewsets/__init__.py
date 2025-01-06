@@ -1,19 +1,21 @@
 import logging
+from functools import cached_property
 
-from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.db import transaction
-from django.db.models import ProtectedError
-from django.shortcuts import get_object_or_404
+from django.db.models import ProtectedError, RestrictedError
+from django_pglocks import advisory_lock
+from netbox.constants import ADVISORY_LOCK_KEYS
+from rest_framework import mixins as drf_mixins
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import GenericViewSet
 
-from extras.models import ExportTemplate
-from netbox.api.exceptions import SerializerNotFound
-from utilities.api import get_serializer_for_model
-from .mixins import *
+from utilities.api import get_annotations_for_serializer, get_prefetches_for_serializer
+from utilities.exceptions import AbortRequest
+from . import mixins
 
 __all__ = (
+    'NetBoxReadOnlyModelViewSet',
     'NetBoxModelViewSet',
 )
 
@@ -28,13 +30,87 @@ HTTP_ACTIONS = {
 }
 
 
-class NetBoxModelViewSet(BulkUpdateModelMixin, BulkDestroyModelMixin, ObjectValidationMixin, ModelViewSet):
+class BaseViewSet(GenericViewSet):
+    """
+    Base class for all API ViewSets. This is responsible for the enforcement of object-based permissions.
+    """
+    brief = False
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+
+        # Restrict the view's QuerySet to allow only the permitted objects
+        if request.user.is_authenticated:
+            if action := HTTP_ACTIONS[request.method]:
+                self.queryset = self.queryset.restrict(request.user, action)
+
+    def initialize_request(self, request, *args, **kwargs):
+
+        # Annotate whether brief mode is active
+        self.brief = request.method == 'GET' and request.GET.get('brief')
+
+        return super().initialize_request(request, *args, **kwargs)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        serializer_class = self.get_serializer_class()
+
+        # Dynamically resolve prefetches for included serializer fields and attach them to the queryset
+        if prefetch := get_prefetches_for_serializer(serializer_class, fields_to_include=self.requested_fields):
+            qs = qs.prefetch_related(*prefetch)
+
+        # Dynamically resolve annotations for RelatedObjectCountFields on the serializer and attach them to the queryset
+        if annotations := get_annotations_for_serializer(serializer_class, fields_to_include=self.requested_fields):
+            qs = qs.annotate(**annotations)
+
+        return qs
+
+    def get_serializer(self, *args, **kwargs):
+
+        # If specific fields have been requested, pass them to the serializer
+        if self.requested_fields:
+            kwargs['fields'] = self.requested_fields
+
+        return super().get_serializer(*args, **kwargs)
+
+    @cached_property
+    def requested_fields(self):
+        # An explicit list of fields was requested
+        if requested_fields := self.request.query_params.get('fields'):
+            return requested_fields.split(',')
+        # Brief mode has been enabled for this request
+        elif self.brief:
+            serializer_class = self.get_serializer_class()
+            return getattr(serializer_class.Meta, 'brief_fields', None)
+        return None
+
+
+class NetBoxReadOnlyModelViewSet(
+    mixins.CustomFieldsMixin,
+    mixins.ExportTemplatesMixin,
+    drf_mixins.RetrieveModelMixin,
+    drf_mixins.ListModelMixin,
+    BaseViewSet
+):
+    pass
+
+
+class NetBoxModelViewSet(
+    mixins.BulkUpdateModelMixin,
+    mixins.BulkDestroyModelMixin,
+    mixins.ObjectValidationMixin,
+    mixins.CustomFieldsMixin,
+    mixins.ExportTemplatesMixin,
+    drf_mixins.CreateModelMixin,
+    drf_mixins.RetrieveModelMixin,
+    drf_mixins.UpdateModelMixin,
+    drf_mixins.DestroyModelMixin,
+    drf_mixins.ListModelMixin,
+    BaseViewSet
+):
     """
     Extend DRF's ModelViewSet to support bulk update and delete functions.
     """
-    brief = False
-    brief_prefetch_fields = []
-
     def get_object_with_snapshot(self):
         """
         Save a pre-change snapshot of the object immediately after retrieving it. This snapshot will be used to
@@ -46,76 +122,22 @@ class NetBoxModelViewSet(BulkUpdateModelMixin, BulkDestroyModelMixin, ObjectVali
         return obj
 
     def get_serializer(self, *args, **kwargs):
-
         # If a list of objects has been provided, initialize the serializer with many=True
         if isinstance(kwargs.get('data', {}), list):
             kwargs['many'] = True
 
         return super().get_serializer(*args, **kwargs)
 
-    def get_serializer_class(self):
-        logger = logging.getLogger('netbox.api.views.ModelViewSet')
-
-        # If using 'brief' mode, find and return the nested serializer for this model, if one exists
-        if self.brief:
-            logger.debug("Request is for 'brief' format; initializing nested serializer")
-            try:
-                serializer = get_serializer_for_model(self.queryset.model, prefix='Nested')
-                logger.debug(f"Using serializer {serializer}")
-                return serializer
-            except SerializerNotFound:
-                logger.debug(f"Nested serializer for {self.queryset.model} not found!")
-
-        # Fall back to the hard-coded serializer class
-        logger.debug(f"Using serializer {self.serializer_class}")
-        return self.serializer_class
-
-    def get_serializer_context(self):
-        """
-        For models which support custom fields, populate the `custom_fields` context.
-        """
-        context = super().get_serializer_context()
-
-        if hasattr(self.queryset.model, 'custom_fields'):
-            content_type = ContentType.objects.get_for_model(self.queryset.model)
-            context.update({
-                'custom_fields': content_type.custom_fields.all(),
-            })
-
-        return context
-
-    def get_queryset(self):
-        # If using brief mode, clear all prefetches from the queryset and append only brief_prefetch_fields (if any)
-        if self.brief:
-            return super().get_queryset().prefetch_related(None).prefetch_related(*self.brief_prefetch_fields)
-
-        return super().get_queryset()
-
-    def initialize_request(self, request, *args, **kwargs):
-        # Check if brief=True has been passed
-        if request.method == 'GET' and request.GET.get('brief'):
-            self.brief = True
-
-        return super().initialize_request(request, *args, **kwargs)
-
-    def initial(self, request, *args, **kwargs):
-        super().initial(request, *args, **kwargs)
-
-        if not request.user.is_authenticated:
-            return
-
-        # Restrict the view's QuerySet to allow only the permitted objects
-        action = HTTP_ACTIONS[request.method]
-        if action:
-            self.queryset = self.queryset.restrict(request.user, action)
-
     def dispatch(self, request, *args, **kwargs):
-        logger = logging.getLogger('netbox.api.views.ModelViewSet')
+        logger = logging.getLogger(f'netbox.api.views.{self.__class__.__name__}')
 
         try:
             return super().dispatch(request, *args, **kwargs)
-        except ProtectedError as e:
-            protected_objects = list(e.protected_objects)
+        except (ProtectedError, RestrictedError) as e:
+            if type(e) is ProtectedError:
+                protected_objects = list(e.protected_objects)
+            else:
+                protected_objects = list(e.restricted_objects)
             msg = f'Unable to delete object. {len(protected_objects)} dependent objects were found: '
             msg += ', '.join([f'{obj} ({obj.pk})' for obj in protected_objects])
             logger.warning(msg)
@@ -125,22 +147,20 @@ class NetBoxModelViewSet(BulkUpdateModelMixin, BulkDestroyModelMixin, ObjectVali
                 *args,
                 **kwargs
             )
+        except AbortRequest as e:
+            logger.debug(e.message)
+            return self.finalize_response(
+                request,
+                Response({'detail': e.message}, status=400),
+                *args,
+                **kwargs
+            )
 
-    def list(self, request, *args, **kwargs):
-        """
-        Overrides ListModelMixin to allow processing ExportTemplates.
-        """
-        if 'export' in request.GET:
-            content_type = ContentType.objects.get_for_model(self.get_serializer_class().Meta.model)
-            et = get_object_or_404(ExportTemplate, content_type=content_type, name=request.GET['export'])
-            queryset = self.filter_queryset(self.get_queryset())
-            return et.render_to_response(queryset)
-
-        return super().list(request, *args, **kwargs)
+    # Creates
 
     def perform_create(self, serializer):
         model = self.queryset.model
-        logger = logging.getLogger('netbox.api.views.ModelViewSet')
+        logger = logging.getLogger(f'netbox.api.views.{self.__class__.__name__}')
         logger.info(f"Creating new {model._meta.verbose_name}")
 
         # Enforce object-level permissions on save()
@@ -151,6 +171,8 @@ class NetBoxModelViewSet(BulkUpdateModelMixin, BulkDestroyModelMixin, ObjectVali
         except ObjectDoesNotExist:
             raise PermissionDenied()
 
+    # Updates
+
     def update(self, request, *args, **kwargs):
         # Hotwire get_object() to ensure we save a pre-change snapshot
         self.get_object = self.get_object_with_snapshot
@@ -158,7 +180,7 @@ class NetBoxModelViewSet(BulkUpdateModelMixin, BulkDestroyModelMixin, ObjectVali
 
     def perform_update(self, serializer):
         model = self.queryset.model
-        logger = logging.getLogger('netbox.api.views.ModelViewSet')
+        logger = logging.getLogger(f'netbox.api.views.{self.__class__.__name__}')
         logger.info(f"Updating {model._meta.verbose_name} {serializer.instance} (PK: {serializer.instance.pk})")
 
         # Enforce object-level permissions on save()
@@ -169,6 +191,8 @@ class NetBoxModelViewSet(BulkUpdateModelMixin, BulkDestroyModelMixin, ObjectVali
         except ObjectDoesNotExist:
             raise PermissionDenied()
 
+    # Deletes
+
     def destroy(self, request, *args, **kwargs):
         # Hotwire get_object() to ensure we save a pre-change snapshot
         self.get_object = self.get_object_with_snapshot
@@ -176,7 +200,26 @@ class NetBoxModelViewSet(BulkUpdateModelMixin, BulkDestroyModelMixin, ObjectVali
 
     def perform_destroy(self, instance):
         model = self.queryset.model
-        logger = logging.getLogger('netbox.api.views.ModelViewSet')
+        logger = logging.getLogger(f'netbox.api.views.{self.__class__.__name__}')
         logger.info(f"Deleting {model._meta.verbose_name} {instance} (PK: {instance.pk})")
 
         return super().perform_destroy(instance)
+
+
+class MPTTLockedMixin:
+    """
+    Puts pglock on objects that derive from MPTTModel for parallel API calling.
+    Note: If adding this to a view, must add the model name to ADVISORY_LOCK_KEYS
+    """
+
+    def create(self, request, *args, **kwargs):
+        with advisory_lock(ADVISORY_LOCK_KEYS[self.queryset.model._meta.model_name]):
+            return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        with advisory_lock(ADVISORY_LOCK_KEYS[self.queryset.model._meta.model_name]):
+            return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        with advisory_lock(ADVISORY_LOCK_KEYS[self.queryset.model._meta.model_name]):
+            return super().destroy(request, *args, **kwargs)

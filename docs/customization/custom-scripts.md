@@ -5,8 +5,20 @@ Custom scripting was introduced to provide a way for users to execute custom log
 * Automatically populate new devices and cables in preparation for a new site deployment
 * Create a range of new reserved prefixes or IP addresses
 * Fetch data from an external source and import it to NetBox
+* Update objects with invalid or incomplete data
 
-Custom scripts are Python code and exist outside of the official NetBox code base, so they can be updated and changed without interfering with the core NetBox installation. And because they're completely custom, there is no inherent limitation on what a script can accomplish.
+They can also be used as a mechanism for validating the integrity of data within NetBox. Script authors can define test to check object against specific rules and conditions. For example, you can write script to check that:
+
+* All top-of-rack switches have a console connection
+* Every router has a loopback interface with an IP address assigned
+* Each interface description conforms to a standard format
+* Every site has a minimum set of VLANs defined
+* All IP addresses have a parent prefix
+
+Custom scripts are Python code which exists outside the NetBox code base, so they can be updated and changed without interfering with the core NetBox installation. And because they're completely custom, there is no inherent limitation on what a script can accomplish.
+
+!!! danger "Only install trusted scripts"
+    Custom scripts have unrestricted access to change anything in the databse and are inherently unsafe and should only be installed and run from trusted sources.  You should also review and set permissions for who can run scripts if the script can modify any data.
 
 ## Writing Custom Scripts
 
@@ -35,11 +47,8 @@ class MyScript(Script):
 
 The `run()` method should accept two arguments:
 
-* `data` - A dictionary containing all of the variable data passed via the web form.
+* `data` - A dictionary containing all the variable data passed via the web form.
 * `commit` - A boolean indicating whether database changes will be committed.
-
-!!! note
-    The `commit` argument was introduced in NetBox v2.7.8. Backward compatibility is maintained for scripts which accept only the `data` argument, however beginning with v2.10 NetBox will require the `run()` method of every script to accept both arguments. (Either argument may still be ignored within the method.)
 
 Defining script variables is optional: You may create a script with only a `run()` method if no user input is needed.
 
@@ -59,15 +68,12 @@ class AnotherCustomScript(Script):
 script_order = (MyCustomScript, AnotherCustomScript)
 ```
 
-## Module Attributes
-
-### `name`
-
-You can define `name` within a script module (the Python file which contains one or more scripts) to set the module name. If `name` is not defined, the module's file name will be used.
-
 ## Script Attributes
 
 Script attributes are defined under a class named `Meta` within the script. These are optional, but encouraged.
+
+!!! warning
+    These are also defined and used as properties on the base custom script class, so don't use the same names as variables or override them in your custom script.
 
 ### `name`
 
@@ -79,7 +85,22 @@ A human-friendly description of what your script does.
 
 ### `field_order`
 
-By default, script variables will be ordered in the form as they are defined in the script. `field_order` may be defined as an iterable of field names to determine the order in which variables are rendered. Any fields not included in this iterable be listed last.
+By default, script variables will be ordered in the form as they are defined in the script. `field_order` may be defined as an iterable of field names to determine the order in which variables are rendered within a default "Script Data" group. Any fields not included in this iterable be listed last. If `fieldsets` is defined, `field_order` will be ignored.  A fieldset group for "Script Execution Parameters" will be added to the end of the form by default for the user.
+
+### `fieldsets`
+
+`fieldsets` may be defined as an iterable of field groups and their field names to determine the order in which variables are group and rendered. Any fields not included in this iterable will not be displayed in the form. If `fieldsets` is defined, `field_order` will be ignored.  A fieldset group for "Script Execution Parameters" will be added to the end of the fieldsets by default for the user.
+
+An example fieldset definition is provided below:
+
+```python
+class MyScript(Script):
+    class Meta:
+        fieldsets = (
+            ('First group', ('field1', 'field2', 'field3')),
+            ('Second group', ('field4', 'field5')),
+        )
+```
 
 ### `commit_default`
 
@@ -89,11 +110,13 @@ The checkbox to commit database changes when executing a script is checked by de
 commit_default = False
 ```
 
+### `scheduling_enabled`
+
+By default, a script can be scheduled for execution at a later time. Setting `scheduling_enabled` to False disables this ability: Only immediate execution will be possible. (This also disables the ability to set a recurring execution interval.)
+
 ### `job_timeout`
 
 Set the maximum allowed runtime for the script. If not set, `RQ_DEFAULT_TIMEOUT` will be used.
-
-!!! info "This feature was introduced in v3.2.1"
 
 ## Accessing Request Data
 
@@ -121,13 +144,101 @@ These two methods will load data in YAML or JSON format, respectively, from file
 
 The Script object provides a set of convenient functions for recording messages at different severity levels:
 
-* `log_debug`
-* `log_success`
-* `log_info`
-* `log_warning`
-* `log_failure`
+* `log_debug(message=None, obj=None)`
+* `log_success(message=None, obj=None)`
+* `log_info(message=None, obj=None)`
+* `log_warning(message=None, obj=None)`
+* `log_failure(message=None, obj=None)`
 
-Log messages are returned to the user upon execution of the script. Markdown rendering is supported for log messages.
+Log messages are returned to the user upon execution of the script. Markdown rendering is supported for log messages. A message may optionally be associated with a particular object by passing it as the second argument to the logging method.
+
+## Test Methods
+
+A script can define one or more test methods to report on certain conditions. All test methods must have a name beginning with `test_` and accept no arguments beyond `self`.
+
+These methods are detected and run automatically when the script is executed, unless its `run()` method has been overridden. (When overriding `run()`, `run_tests()` can be called to run all test methods present in the script.)
+
+Calling any of these logging methods without a message will increment the relevant counter, but will not generate an output line in the script's log.
+
+!!! info
+    This functionality was ported from [legacy reports](./reports.md) in NetBox v4.0.
+
+### Example
+
+```
+from dcim.choices import DeviceStatusChoices
+from dcim.models import ConsolePort, Device, PowerPort
+from extras.scripts import Script
+
+
+class DeviceConnectionsReport(Script):
+    description = "Validate the minimum physical connections for each device"
+
+    def test_console_connection(self):
+
+        # Check that every console port for every active device has a connection defined.
+        active = DeviceStatusChoices.STATUS_ACTIVE
+        for console_port in ConsolePort.objects.prefetch_related('device').filter(device__status=active):
+            if not console_port.connected_endpoints:
+                self.log_failure(
+                    f"No console connection defined for {console_port.name}",
+                    console_port.device,
+                )
+            elif not console_port.connection_status:
+                self.log_warning(
+                    f"Console connection for {console_port.name} marked as planned",
+                    console_port.device,
+                )
+            else:
+                self.log_success("Passed", console_port.device)
+
+    def test_power_connections(self):
+
+        # Check that every active device has at least two connected power supplies.
+        for device in Device.objects.filter(status=DeviceStatusChoices.STATUS_ACTIVE):
+            connected_ports = 0
+            for power_port in PowerPort.objects.filter(device=device):
+                if power_port.connected_endpoints:
+                    connected_ports += 1
+                    if not power_port.path.is_active:
+                        self.log_warning(
+                            f"Power connection for {power_port.name} marked as planned",
+                            device,
+                        )
+            if connected_ports < 2:
+                self.log_failure(
+                    f"{connected_ports} connected power supplies found (2 needed)",
+                    device,
+                )
+            else:
+                self.log_success("Passed", device)
+```
+
+## Change Logging
+
+To generate the correct change log data when editing an existing object, a snapshot of the object must be taken before making any changes to the object.
+
+```python
+if obj.pk and hasattr(obj, 'snapshot'):
+    obj.snapshot()
+
+obj.property = "New Value"
+obj.full_clean()
+obj.save()
+```
+
+## Error handling
+
+Sometimes things go wrong and a script will run into an `Exception`. If that happens and an uncaught exception is raised by the custom script, the execution is aborted and a full stack trace is reported.
+
+Although this is helpful for debugging, in some situations it might be required to cleanly abort the execution of a custom script (e.g. because of invalid input data) and thereby make sure no changes are performed on the database. In this case the script can throw an `AbortScript` exception, which will prevent the stack trace from being reported, but still terminating the script's execution and reporting a given error message.
+
+```python
+from utilities.exceptions import AbortScript
+
+if some_error:
+    raise AbortScript("Some meaningful error message")
+```
 
 ## Variable Reference
 
@@ -195,6 +306,7 @@ A particular object within NetBox. Each ObjectVar must specify a particular mode
 
 * `model` - The model class
 * `query_params` - A dictionary of query parameters to use when retrieving available options (optional)
+* `context` - A custom dictionary mapping template context variables to fields, used when rendering `<option>` elements within the dropdown menu (optional; see below)
 * `null_option` - A label representing a "null" or empty choice (optional)
 
 To limit the selections available within the list, additional query parameters can be passed as the `query_params` dictionary. For example, to show only devices with an "active" status:
@@ -222,6 +334,22 @@ site = ObjectVar(
 )
 ```
 
+#### Context Variables
+
+Custom context variables can be passed to override the default attribute names or to display additional information, such as a parent object.
+
+| Name          | Default         | Description                                                                  |
+|---------------|-----------------|------------------------------------------------------------------------------|
+| `value`       | `"id"`          | The attribute which contains the option's value                              |
+| `label`       | `"display"`     | The attribute used as the option's human-friendly label                      |
+| `description` | `"description"` | The attribute to use as a description                                        |
+| `depth`[^1]   | `"_depth"`      | The attribute which indicates an object's depth within a recursive hierarchy |
+| `disabled`    | --              | The attribute which, if true, signifies that the option should be disabled   |
+| `parent`      | --              | The attribute which represents the object's parent object                    |
+| `count`[^1]   | --              | The attribute which contains a numeric count of related objects              |
+
+[^1]: The value of this attribute must be a positive integer
+
 ### MultiObjectVar
 
 Similar to `ObjectVar`, but allows for the selection of multiple objects.
@@ -245,16 +373,24 @@ An IPv4 or IPv6 network with a mask. Returns a `netaddr.IPNetwork` object. Two a
 * `min_prefix_length` - Minimum length of the mask
 * `max_prefix_length` - Maximum length of the mask
 
+### DateVar
+
+A calendar date. Returns a `datetime.date` object.
+
+### DateTimeVar
+
+A complete date & time. Returns a `datetime.datetime` object.
+
 ## Running Custom Scripts
 
 !!! note
-    To run a custom script, a user must be assigned the `extras.run_script` permission. This is achieved by assigning the user (or group) a permission on the Script object and specifying the `run` action in the admin UI as shown below.
+    To run a custom script, a user must be assigned permissions for `Extras > Script`, `Extras > Script Module`, and `Core > Managed File` objects. They must also be assigned the `extras.run_script` permission. This is achieved by assigning the user (or group) a permission on the Script object and specifying the `run` action in "Permissions" as shown below.
 
-    ![Adding the run action to a permission](../media/admin_ui_run_permission.png)
+    ![Adding the run action to a permission](../media/run_permission.png)
 
 ### Via the Web UI
 
-Custom scripts can be run via the web UI by navigating to the script, completing any required form data, and clicking the "run script" button.
+Custom scripts can be run via the web UI by navigating to the script, completing any required form data, and clicking the "run script" button. It is possible to schedule a script to be executed at specified time in the future. A scheduled script can be canceled by deleting the associated job result object.
 
 ### Via the API
 
@@ -269,12 +405,14 @@ http://netbox/api/extras/scripts/example.MyReport/ \
 --data '{"data": {"foo": "somevalue", "bar": 123}, "commit": true}'
 ```
 
+Optionally `schedule_at` can be passed in the form data with a datetime string to schedule a script at the specified date and time.
+
 ### Via the CLI
 
 Scripts can be run on the CLI by invoking the management command:
 
 ```
-python3 manage.py runscript [--commit] [--loglevel {debug,info,warning,error,critical}] [--data "<data>"] <module>.<script> 
+python3 manage.py runscript [--commit] [--loglevel {debug,info,warning,error,critical}] [--data "<data>"] <module>.<script>
 ```
 
 The required ``<module>.<script>`` argument is the script to run where ``<module>`` is the name of the python file in the ``scripts`` directory without the ``.py`` extension and ``<script>`` is the name of the script class in the ``<module>`` to run.
@@ -336,6 +474,7 @@ class NewBranchScript(Script):
             slug=slugify(data['site_name']),
             status=SiteStatusChoices.STATUS_PLANNED
         )
+        site.full_clean()
         site.save()
         self.log_success(f"Created new site: {site}")
 
@@ -347,8 +486,9 @@ class NewBranchScript(Script):
                 name=f'{site.slug}-switch{i}',
                 site=site,
                 status=DeviceStatusChoices.STATUS_PLANNED,
-                device_role=switch_role
+                role=switch_role
             )
+            switch.full_clean()
             switch.save()
             self.log_success(f"Created new switch: {switch}")
 

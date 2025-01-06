@@ -5,21 +5,21 @@ from django.test import TestCase
 from mptt.fields import TreeForeignKey
 from taggit.managers import TaggableManager
 
-from circuits.filtersets import CircuitFilterSet, ProviderFilterSet
-from circuits.models import Circuit, Provider
 from dcim.choices import *
 from dcim.fields import MACAddressField
-from dcim.filtersets import DeviceFilterSet, SiteFilterSet
+from dcim.filtersets import DeviceFilterSet, SiteFilterSet, InterfaceFilterSet
 from dcim.models import (
     Device, DeviceRole, DeviceType, Interface, Manufacturer, Platform, Rack, Region, Site
 )
 from extras.filters import TagFilter
 from extras.models import TaggedItem
+from ipam.filtersets import ASNFilterSet
 from ipam.models import RIR, ASN
 from netbox.filtersets import BaseFilterSet
+from wireless.choices import WirelessRoleChoices
 from utilities.filters import (
-    MACAddressFilter, MultiValueCharFilter, MultiValueDateFilter, MultiValueDateTimeFilter, MultiValueNumberFilter,
-    MultiValueTimeFilter, TreeNodeMultipleChoiceFilter,
+    MultiValueCharFilter, MultiValueDateFilter, MultiValueDateTimeFilter, MultiValueMACAddressFilter,
+    MultiValueNumberFilter, MultiValueTimeFilter, TreeNodeMultipleChoiceFilter,
 )
 
 
@@ -87,6 +87,10 @@ class DummyModel(models.Model):
     charfield = models.CharField(
         max_length=10
     )
+    numberfield = models.IntegerField(
+        blank=True,
+        null=True
+    )
     choicefield = models.IntegerField(
         choices=(('A', 1), ('B', 2), ('C', 3))
     )
@@ -109,7 +113,8 @@ class BaseFilterSetTest(TestCase):
     """
     class DummyFilterSet(BaseFilterSet):
         charfield = django_filters.CharFilter()
-        macaddressfield = MACAddressFilter()
+        numberfield = django_filters.NumberFilter()
+        macaddressfield = MultiValueMACAddressFilter()
         modelchoicefield = django_filters.ModelChoiceFilter(
             field_name='integerfield',  # We're pretending this is a ForeignKey field
             queryset=Site.objects.all()
@@ -133,6 +138,7 @@ class BaseFilterSetTest(TestCase):
             model = DummyModel
             fields = (
                 'charfield',
+                'numberfield',
                 'choicefield',
                 'datefield',
                 'datetimefield',
@@ -172,9 +178,28 @@ class BaseFilterSetTest(TestCase):
         self.assertEqual(self.filters['charfield__iew'].exclude, False)
         self.assertEqual(self.filters['charfield__niew'].lookup_expr, 'iendswith')
         self.assertEqual(self.filters['charfield__niew'].exclude, True)
+        self.assertEqual(self.filters['charfield__empty'].lookup_expr, 'empty')
+        self.assertEqual(self.filters['charfield__empty'].exclude, False)
+
+    def test_number_filter(self):
+        self.assertIsInstance(self.filters['numberfield'], django_filters.NumberFilter)
+        self.assertEqual(self.filters['numberfield'].lookup_expr, 'exact')
+        self.assertEqual(self.filters['numberfield'].exclude, False)
+        self.assertEqual(self.filters['numberfield__n'].lookup_expr, 'exact')
+        self.assertEqual(self.filters['numberfield__n'].exclude, True)
+        self.assertEqual(self.filters['numberfield__lt'].lookup_expr, 'lt')
+        self.assertEqual(self.filters['numberfield__lt'].exclude, False)
+        self.assertEqual(self.filters['numberfield__lte'].lookup_expr, 'lte')
+        self.assertEqual(self.filters['numberfield__lte'].exclude, False)
+        self.assertEqual(self.filters['numberfield__gt'].lookup_expr, 'gt')
+        self.assertEqual(self.filters['numberfield__gt'].exclude, False)
+        self.assertEqual(self.filters['numberfield__gte'].lookup_expr, 'gte')
+        self.assertEqual(self.filters['numberfield__gte'].exclude, False)
+        self.assertEqual(self.filters['numberfield__empty'].lookup_expr, 'isnull')
+        self.assertEqual(self.filters['numberfield__empty'].exclude, False)
 
     def test_mac_address_filter(self):
-        self.assertIsInstance(self.filters['macaddressfield'], MACAddressFilter)
+        self.assertIsInstance(self.filters['macaddressfield'], MultiValueMACAddressFilter)
         self.assertEqual(self.filters['macaddressfield'].lookup_expr, 'exact')
         self.assertEqual(self.filters['macaddressfield'].exclude, False)
         self.assertEqual(self.filters['macaddressfield__n'].lookup_expr, 'exact')
@@ -338,13 +363,14 @@ class DynamicFilterLookupExpressionTest(TestCase):
     """
     @classmethod
     def setUpTestData(cls):
+        rir = RIR.objects.create(name='RIR 1', slug='rir-1')
 
-        providers = (
-            Provider(name='Provider 1', slug='provider-1', asn=65001),
-            Provider(name='Provider 2', slug='provider-2', asn=65101),
-            Provider(name='Provider 3', slug='provider-3', asn=65201),
+        asns = (
+            ASN(asn=65001, rir=rir),
+            ASN(asn=65101, rir=rir),
+            ASN(asn=65201, rir=rir),
         )
-        Provider.objects.bulk_create(providers)
+        ASN.objects.bulk_create(asns)
 
         manufacturers = (
             Manufacturer(name='Manufacturer 1', slug='manufacturer-1'),
@@ -360,12 +386,12 @@ class DynamicFilterLookupExpressionTest(TestCase):
         )
         DeviceType.objects.bulk_create(device_types)
 
-        device_roles = (
+        roles = (
             DeviceRole(name='Device Role 1', slug='device-role-1'),
             DeviceRole(name='Device Role 2', slug='device-role-2'),
             DeviceRole(name='Device Role 3', slug='device-role-3'),
         )
-        DeviceRole.objects.bulk_create(device_roles)
+        DeviceRole.objects.bulk_create(roles)
 
         platforms = (
             Platform(name='Platform 1', slug='platform-1'),
@@ -383,20 +409,11 @@ class DynamicFilterLookupExpressionTest(TestCase):
             region.save()
 
         sites = (
-            Site(name='Site 1', slug='abc-site-1', region=regions[0]),
-            Site(name='Site 2', slug='def-site-2', region=regions[1]),
-            Site(name='Site 3', slug='ghi-site-3', region=regions[2]),
+            Site(name='Site 1', slug='abc-site-1', region=regions[0], status=SiteStatusChoices.STATUS_ACTIVE),
+            Site(name='Site 2', slug='def-site-2', region=regions[1], status=SiteStatusChoices.STATUS_ACTIVE),
+            Site(name='Site 3', slug='ghi-site-3', region=regions[2], status=SiteStatusChoices.STATUS_PLANNED),
         )
         Site.objects.bulk_create(sites)
-
-        rir = RIR.objects.create(name='RFC 6996', is_private=True)
-
-        asns = [
-            ASN(asn=65001, rir=rir),
-            ASN(asn=65101, rir=rir),
-            ASN(asn=65201, rir=rir)
-        ]
-        ASN.objects.bulk_create(asns)
 
         asns[0].sites.add(sites[0])
         asns[1].sites.add(sites[1])
@@ -410,9 +427,9 @@ class DynamicFilterLookupExpressionTest(TestCase):
         Rack.objects.bulk_create(racks)
 
         devices = (
-            Device(name='Device 1', device_type=device_types[0], device_role=device_roles[0], platform=platforms[0], serial='ABC', asset_tag='1001', site=sites[0], rack=racks[0], position=1, face=DeviceFaceChoices.FACE_FRONT, status=DeviceStatusChoices.STATUS_ACTIVE, local_context_data={"foo": 123}),
-            Device(name='Device 2', device_type=device_types[1], device_role=device_roles[1], platform=platforms[1], serial='DEF', asset_tag='1002', site=sites[1], rack=racks[1], position=2, face=DeviceFaceChoices.FACE_FRONT, status=DeviceStatusChoices.STATUS_STAGED),
-            Device(name='Device 3', device_type=device_types[2], device_role=device_roles[2], platform=platforms[2], serial='GHI', asset_tag='1003', site=sites[2], rack=racks[2], position=3, face=DeviceFaceChoices.FACE_REAR, status=DeviceStatusChoices.STATUS_FAILED),
+            Device(name='Device 1', device_type=device_types[0], role=roles[0], platform=platforms[0], serial='ABC', asset_tag='1001', site=sites[0], rack=racks[0], position=1, face=DeviceFaceChoices.FACE_FRONT, status=DeviceStatusChoices.STATUS_ACTIVE, local_context_data={"foo": 123}),
+            Device(name='Device 2', device_type=device_types[1], role=roles[1], platform=platforms[1], serial='DEF', asset_tag='1002', site=sites[1], rack=racks[1], position=2, face=DeviceFaceChoices.FACE_FRONT, status=DeviceStatusChoices.STATUS_STAGED),
+            Device(name='Device 3', device_type=device_types[2], role=roles[2], platform=platforms[2], serial='GHI', asset_tag='1003', site=sites[2], rack=racks[2], position=3, face=DeviceFaceChoices.FACE_REAR, status=DeviceStatusChoices.STATUS_FAILED),
         )
         Device.objects.bulk_create(devices)
 
@@ -422,13 +439,21 @@ class DynamicFilterLookupExpressionTest(TestCase):
             Interface(device=devices[1], name='Interface 3', mac_address='00-00-00-00-00-02'),
             Interface(device=devices[1], name='Interface 4', mac_address='bb-00-00-00-00-02'),
             Interface(device=devices[2], name='Interface 5', mac_address='00-00-00-00-00-03'),
-            Interface(device=devices[2], name='Interface 6', mac_address='cc-00-00-00-00-03'),
+            Interface(device=devices[2], name='Interface 6', mac_address='cc-00-00-00-00-03', rf_role=WirelessRoleChoices.ROLE_AP),
         )
         Interface.objects.bulk_create(interfaces)
 
     def test_site_name_negation(self):
         params = {'name__n': ['Site 1']}
         self.assertEqual(SiteFilterSet(params, Site.objects.all()).qs.count(), 2)
+
+    def test_site_status_icontains(self):
+        params = {'status__ic': [SiteStatusChoices.STATUS_ACTIVE]}
+        self.assertEqual(SiteFilterSet(params, Site.objects.all()).qs.count(), 2)
+
+    def test_site_status_icontains_negation(self):
+        params = {'status__nic': [SiteStatusChoices.STATUS_ACTIVE]}
+        self.assertEqual(SiteFilterSet(params, Site.objects.all()).qs.count(), 1)
 
     def test_site_slug_icontains(self):
         params = {'slug__ic': ['-1']}
@@ -456,19 +481,19 @@ class DynamicFilterLookupExpressionTest(TestCase):
 
     def test_provider_asn_lt(self):
         params = {'asn__lt': [65101]}
-        self.assertEqual(ProviderFilterSet(params, Provider.objects.all()).qs.count(), 1)
+        self.assertEqual(ASNFilterSet(params, ASN.objects.all()).qs.count(), 1)
 
     def test_provider_asn_lte(self):
         params = {'asn__lte': [65101]}
-        self.assertEqual(ProviderFilterSet(params, Provider.objects.all()).qs.count(), 2)
+        self.assertEqual(ASNFilterSet(params, ASN.objects.all()).qs.count(), 2)
 
     def test_provider_asn_gt(self):
         params = {'asn__lt': [65101]}
-        self.assertEqual(ProviderFilterSet(params, Provider.objects.all()).qs.count(), 1)
+        self.assertEqual(ASNFilterSet(params, ASN.objects.all()).qs.count(), 1)
 
     def test_provider_asn_gte(self):
         params = {'asn__gte': [65101]}
-        self.assertEqual(ProviderFilterSet(params, Provider.objects.all()).qs.count(), 2)
+        self.assertEqual(ASNFilterSet(params, ASN.objects.all()).qs.count(), 2)
 
     def test_site_region_negation(self):
         params = {'region__n': ['region-1']}
@@ -537,3 +562,9 @@ class DynamicFilterLookupExpressionTest(TestCase):
     def test_device_mac_address_icontains_negation(self):
         params = {'mac_address__nic': ['aa:', 'bb']}
         self.assertEqual(DeviceFilterSet(params, Device.objects.all()).qs.count(), 1)
+
+    def test_interface_rf_role_empty(self):
+        params = {'rf_role__empty': 'true'}
+        self.assertEqual(InterfaceFilterSet(params, Interface.objects.all()).qs.count(), 5)
+        params = {'rf_role__empty': 'false'}
+        self.assertEqual(InterfaceFilterSet(params, Interface.objects.all()).qs.count(), 1)

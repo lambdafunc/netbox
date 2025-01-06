@@ -1,5 +1,25 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+    paths-ignore:
+      - 'contrib/**'
+      - 'docs/**'
+      - 'netbox/translations/**'
+  pull_request:
+    paths-ignore:
+      - 'contrib/**'
+      - 'docs/**'
+      - 'netbox/translations/**'
+
+permissions:
+  contents: read
+
+# Add concurrency group to control job running
+concurrency:
+  group: ${{ github.event_name }}-${{ github.ref }}-${{ github.actor }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -7,8 +27,8 @@ jobs:
       NETBOX_CONFIGURATION: netbox.configuration_testing
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10']
-        node-version: ['14.x']
+        python-version: ['3.10', '3.11', '3.12']
+        node-version: ['18.x']
     services:
       redis:
         image: redis
@@ -29,15 +49,15 @@ jobs:
 
     steps:
     - name: Check out repo
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v2
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
     
@@ -45,7 +65,7 @@ jobs:
       run: npm install -g yarn
     
     - name: Setup Node.js with Yarn Caching
-      uses: actions/setup-node@v2
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
         cache: yarn
@@ -58,7 +78,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pycodestyle coverage tblib
+        pip install ruff coverage tblib
 
     - name: Build documentation
       run: mkdocs build
@@ -66,8 +86,11 @@ jobs:
     - name: Collect static files
       run: python netbox/manage.py collectstatic --no-input
 
+    - name: Check for missing migrations
+      run: python netbox/manage.py makemigrations --check
+
     - name: Check PEP8 compliance
-      run: pycodestyle --ignore=W504,E501 --exclude=node_modules netbox/
+      run: ruff check netbox/
 
     - name: Check UI ESLint, TypeScript, and Prettier Compliance
       run: yarn --cwd netbox/project-static validate
@@ -79,4 +102,4 @@ jobs:
       run: coverage run --source="netbox/" netbox/manage.py test netbox/ --parallel
 
     - name: Show coverage report
-      run: coverage report --skip-covered --omit *migrations*
+      run: coverage report --skip-covered --omit '*/migrations/*,*/tests/*'

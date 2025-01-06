@@ -1,116 +1,95 @@
-{% extends 'base/layout.html' %}
-{% load form_helpers %}
-{% load helpers %}
+{% extends 'generic/_base.html' %}
+{% load i18n %}
 
 {% comment %}
 Blocks:
-  form: Content within the <form> element
-  buttons: Form submission buttons
+  - title:      Page title
+  - controls:   Control elements displayed between the header and content
+  - tabs:       Page tabs
+  - content:    Primary page content
+    - form:     Content within the <form> element
+    - buttons:  Form submission buttons
+  - modals:     Any pre-loaded modals
 
 Context:
-  object: Python instance of the object being edited
-  form: The edit form
-  return_url: The URL to which the user is redirected after submitting the form
+  - object:      Python instance of the object being edited
+  - form:        The edit form
+  - return_url:  The URL to which the user is redirected after submitting the form
 {% endcomment %}
 
 {% block title %}
-  {% if object.pk %}Editing {{ object|meta:"verbose_name" }} {{ object }}{% else %}Add a new {{ object|meta:"verbose_name" }}{% endif %}
+  {% if object.pk %}
+    {% trans "Editing" %} {{ object|meta:"verbose_name" }} {{ object }}
+  {% else %}
+    {% blocktrans trimmed with object_type=object|meta:"verbose_name" %}
+      Add a new {{ object_type }}
+    {% endblocktrans %}
+  {% endif %}
 {% endblock title %}
 
+{% block controls %}
+  <div class="btn-list">
+
+    {# Link to model documentation #}
+    {% if settings.DOCS_ROOT and object.docs_url %}
+      <a href="{{ object.docs_url }}" target="_blank" class="btn btn-outline-secondary" title="{% trans "View model documentation" %}">
+        <i class="mdi mdi-help-circle"></i> {% trans "Help" %}
+      </a>
+    {% endif %}
+
+  </div>
+{% endblock controls %}
+
 {% block tabs %}
-  <ul class="nav nav-tabs px-3">
+  <ul class="nav nav-tabs">
     <li class="nav-item" role="presentation">
       <button class="nav-link active" id="edit-form-tab" data-bs-toggle="tab" data-bs-target="#edit-form" type="button" role="tab" aria-controls="edit-form" aria-selected="true">
-        {% if object.pk %}Edit{% else %}Create{% endif %}
+        {% if object.pk %}{% trans "Edit" %}{% else %}{% trans "Create" %}{% endif %}
       </button>
     </li>
   </ul>
 {% endblock tabs %}
 
-{% block content-wrapper %}
-  <div class="tab-content">
-    <div class="tab-pane show active" id="edit-form" role="tabpanel" aria-labelledby="object-list-tab">
+{% block content %}
+  <div class="tab-pane show active" id="edit-form" role="tabpanel" aria-labelledby="object-list-tab">
 
-      {# Link to model documentation #}
-      {% if object and settings.DOCS_ROOT %}
-        <div class="float-end">
-          <a href="{{ object|get_docs_url }}" target="_blank" class="btn btn-sm btn-outline-secondary" title="View model documentation">
-            <i class="mdi mdi-help-circle"></i> Help
-          </a>
-        </div>
-      {% endif %}
+    {# Warn about missing prerequisite objects #}
+    {% if prerequisite_model %}
+      {% include 'inc/missing_prerequisites.html' %}
+    {% endif %}
 
-      <form action="" method="post" enctype="multipart/form-data" class="form-object-edit mt-5">
-        {% csrf_token %}
+    <form action="" method="post" enctype="multipart/form-data" class="object-edit mt-5">
+      {% csrf_token %}
 
+      <div id="form_fields" hx-disinherit="hx-select hx-swap">
         {% block form %}
-          {% if form.fieldsets %}
+          {% include 'htmx/form.html' %}
+        {% endblock form %}
+      </div>
 
-            {# Render hidden fields #}
-            {% for field in form.hidden_fields %}
-              {{ field }}
-            {% endfor %}
-
-            {# Render grouped fields according to Form #}
-            {% for group, fields in form.fieldsets %}
-              <div class="field-group mb-5">
-                <div class="row mb-2">
-                  <h5 class="offset-sm-3">{{ group }}</h5>
-                </div>
-                {% for name in fields %}
-                  {% with field=form|getfield:name %}
-                    {% if not field.field.widget.is_hidden %}
-                      {% render_field field %}
-                    {% endif %}
-                  {% endwith %}
-                {% endfor %}
-              </div>
-            {% endfor %}
-
-            {% if form.custom_fields %}
-              <div class="field-group mb-5">
-                <div class="row mb-2">
-                  <h5 class="offset-sm-3">Custom Fields</h5>
-                </div>
-                {% render_custom_fields form %}
-              </div>
-            {% endif %}
-
-            {% if form.comments %}
-              <div class="field-group mb-5">
-                <h5 class="text-center">Comments</h5>
-                {% render_field form.comments %}
-              </div>
-            {% endif %}
-
+      <div class="btn-float-group-right">
+        {% block buttons %}
+          <a href="{{ return_url }}" class="btn btn-outline-secondary btn-float">{% trans "Cancel" %}</a>
+          {% if object.pk %}
+            <button type="submit" name="_update" class="btn btn-primary">
+              {% trans "Save" %}
+            </button>
           {% else %}
-            {# Render all fields in a single group #}
-            <div class="field-group mb-5">
-              {% render_form form %}
+            <div class="btn-group" role="group" aria-label="{% trans "Actions" %}">
+              <button type="submit" name="_create" class="btn btn-primary">
+                {% trans "Create" %}
+              </button>
+              <button type="submit" name="_addanother" class="btn btn-outline-primary btn-float">
+                {% trans "Create & Add Another" %}
+              </button>
             </div>
           {% endif %}
-
-        {% endblock form %}
-
-        <div class="text-end my-3">
-          {% block buttons %}
-            <a class="btn btn-outline-danger" href="{{ return_url }}">Cancel</a>
-            {% if object.pk %}
-              <button type="submit" name="_update" class="btn btn-primary">
-                Save
-              </button>
-            {% else %}
-              <button type="submit" name="_addanother" class="btn btn-outline-primary">
-                Create & Add Another
-              </button>
-              <button type="submit" name="_create" class="btn btn-primary">
-                Create
-              </button>
-            {% endif %}
-          {% endblock buttons %}
-        </div>
-      </form>
-    </div>
+        {% endblock buttons %}
+      </div>
+    </form>
   </div>
+{% endblock content %}
 
-{% endblock content-wrapper %}
+{% block modals %}
+  {% include 'inc/htmx_modal.html' with size='lg' %}
+{% endblock %}

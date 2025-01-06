@@ -1,10 +1,8 @@
-import urllib.parse
-
-from django.contrib.contenttypes.models import ContentType
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 
+from core.models import ObjectType
 from dcim.models import Region, Site
 from extras.choices import CustomFieldTypeChoices
 from extras.models import CustomField
@@ -146,24 +144,37 @@ class APIPaginationTestCase(APITestCase):
         self.assertIsNone(response.data['previous'])
         self.assertEqual(len(response.data['results']), page_size)
 
+    @override_settings(MAX_PAGE_SIZE=30)
+    def test_default_page_size_with_small_max_page_size(self):
+        response = self.client.get(self.url, format='json', **self.header)
+        page_size = get_config().MAX_PAGE_SIZE
+        paginate_count = get_config().PAGINATE_COUNT
+        self.assertLess(page_size, 100, "Default page size not sufficient for data set")
+
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 100)
+        self.assertTrue(response.data['next'].endswith(f'?limit={paginate_count}&offset={paginate_count}'))
+        self.assertIsNone(response.data['previous'])
+        self.assertEqual(len(response.data['results']), paginate_count)
+
     def test_custom_page_size(self):
         response = self.client.get(f'{self.url}?limit=10', format='json', **self.header)
 
         self.assertHttpStatus(response, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 100)
-        self.assertTrue(response.data['next'].endswith(f'?limit=10&offset=10'))
+        self.assertTrue(response.data['next'].endswith('?limit=10&offset=10'))
         self.assertIsNone(response.data['previous'])
         self.assertEqual(len(response.data['results']), 10)
 
-    @override_settings(MAX_PAGE_SIZE=20)
+    @override_settings(MAX_PAGE_SIZE=80)
     def test_max_page_size(self):
         response = self.client.get(f'{self.url}?limit=0', format='json', **self.header)
 
         self.assertHttpStatus(response, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 100)
-        self.assertTrue(response.data['next'].endswith(f'?limit=20&offset=20'))
+        self.assertTrue(response.data['next'].endswith('?limit=80&offset=80'))
         self.assertIsNone(response.data['previous'])
-        self.assertEqual(len(response.data['results']), 20)
+        self.assertEqual(len(response.data['results']), 80)
 
     @override_settings(MAX_PAGE_SIZE=0)
     def test_max_page_size_disabled(self):
@@ -176,24 +187,82 @@ class APIPaginationTestCase(APITestCase):
         self.assertEqual(len(response.data['results']), 100)
 
 
+class APIOrderingTestCase(APITestCase):
+    user_permissions = ('dcim.view_site',)
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.url = reverse('dcim-api:site-list')
+
+        sites = (
+            Site(name='Site 1', slug='site-1', facility='C', description='Z'),
+            Site(name='Site 2', slug='site-2', facility='C', description='Y'),
+            Site(name='Site 3', slug='site-3', facility='B', description='X'),
+            Site(name='Site 4', slug='site-4', facility='B', description='W'),
+            Site(name='Site 5', slug='site-5', facility='A', description='V'),
+            Site(name='Site 6', slug='site-6', facility='A', description='U'),
+        )
+        Site.objects.bulk_create(sites)
+
+    def test_default_order(self):
+        response = self.client.get(self.url, format='json', **self.header)
+
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 6)
+        self.assertListEqual(
+            [s['name'] for s in response.data['results']],
+            ['Site 1', 'Site 2', 'Site 3', 'Site 4', 'Site 5', 'Site 6']
+        )
+
+    def test_order_single_field(self):
+        response = self.client.get(f'{self.url}?ordering=description', format='json', **self.header)
+
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 6)
+        self.assertListEqual(
+            [s['name'] for s in response.data['results']],
+            ['Site 6', 'Site 5', 'Site 4', 'Site 3', 'Site 2', 'Site 1']
+        )
+
+    def test_order_reversed(self):
+        response = self.client.get(f'{self.url}?ordering=-name', format='json', **self.header)
+
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 6)
+        self.assertListEqual(
+            [s['name'] for s in response.data['results']],
+            ['Site 6', 'Site 5', 'Site 4', 'Site 3', 'Site 2', 'Site 1']
+        )
+
+    def test_order_multiple_fields(self):
+        response = self.client.get(f'{self.url}?ordering=facility,name', format='json', **self.header)
+
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 6)
+        self.assertListEqual(
+            [s['name'] for s in response.data['results']],
+            ['Site 5', 'Site 6', 'Site 3', 'Site 4', 'Site 1', 'Site 2']
+        )
+
+
 class APIDocsTestCase(TestCase):
 
     def setUp(self):
         self.client = Client()
 
         # Populate a CustomField to activate CustomFieldSerializer
-        content_type = ContentType.objects.get_for_model(Site)
+        object_type = ObjectType.objects.get_for_model(Site)
         self.cf_text = CustomField(type=CustomFieldTypeChoices.TYPE_TEXT, name='test')
         self.cf_text.save()
-        self.cf_text.content_types.set([content_type])
+        self.cf_text.object_types.set([object_type])
         self.cf_text.save()
 
     def test_api_docs(self):
 
         url = reverse('api_docs')
-        params = {
-            "format": "openapi",
-        }
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
 
-        response = self.client.get('{}?{}'.format(url, urllib.parse.urlencode(params)))
+        url = reverse('schema')
+        response = self.client.get(url)
         self.assertEqual(response.status_code, 200)

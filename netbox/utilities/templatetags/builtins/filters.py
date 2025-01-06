@@ -5,13 +5,35 @@ import re
 import yaml
 from django import template
 from django.contrib.contenttypes.models import ContentType
-from django.utils.html import strip_tags
+from django.contrib.humanize.templatetags.humanize import naturalday, naturaltime
+from django.utils.html import escape
 from django.utils.safestring import mark_safe
+from django.utils.timezone import localtime
 from markdown import markdown
+from markdown.extensions.tables import TableExtension
 
 from netbox.config import get_config
+from utilities.html import clean_html, foreground_color
 from utilities.markdown import StrikethroughExtension
-from utilities.utils import foreground_color
+from utilities.string import title
+
+__all__ = (
+    'bettertitle',
+    'content_type',
+    'content_type_id',
+    'fgcolor',
+    'isodate',
+    'isodatetime',
+    'isotime',
+    'linkify',
+    'meta',
+    'placeholder',
+    'render_json',
+    'render_markdown',
+    'render_yaml',
+    'split',
+    'tzoffset',
+)
 
 register = template.Library()
 
@@ -35,9 +57,9 @@ def linkify(instance, attr=None):
     text = getattr(instance, attr) if attr is not None else str(instance)
     try:
         url = instance.get_absolute_url()
-        return mark_safe(f'<a href="{url}">{text}</a>')
+        return mark_safe(f'<a href="{url}">{escape(text)}</a>')
     except (AttributeError, TypeError):
-        return text
+        return escape(text)
 
 
 @register.filter()
@@ -46,7 +68,7 @@ def bettertitle(value):
     Alternative to the builtin title(). Ensures that the first letter of each word is uppercase but retains the
     original case of all others.
     """
-    return ' '.join([w[0].upper() + w[1:] for w in value.split()])
+    return title(value)
 
 
 @register.filter()
@@ -86,8 +108,8 @@ def placeholder(value):
     """
     if value not in ('', None):
         return value
-    placeholder = '<span class="text-muted">&mdash;</span>'
-    return mark_safe(placeholder)
+
+    return mark_safe('<span class="text-muted">&mdash;</span>')
 
 
 @register.filter()
@@ -144,25 +166,25 @@ def render_markdown(value):
 
         {{ md_source_text|markdown }}
     """
-    schemes = '|'.join(get_config().ALLOWED_URL_SCHEMES)
-
-    # Strip HTML tags
-    value = strip_tags(value)
-
-    # Sanitize Markdown links
-    pattern = fr'\[([^\]]+)\]\(\s*(?!({schemes})).*:(.+)\)'
-    value = re.sub(pattern, '[\\1](\\3)', value, flags=re.IGNORECASE)
-
-    # Sanitize Markdown reference links
-    pattern = fr'\[([^\]]+)\]:\s*(?!({schemes}))\w*:(.+)'
-    value = re.sub(pattern, '[\\1]: \\3', value, flags=re.IGNORECASE)
+    if not value:
+        return ''
 
     # Render Markdown
-    html = markdown(value, extensions=['def_list', 'fenced_code', 'tables', StrikethroughExtension()])
+    html = markdown(value, extensions=[
+        'def_list',
+        'fenced_code',
+        StrikethroughExtension(),
+        TableExtension(use_align_attribute=True),
+    ])
 
     # If the string is not empty wrap it in rendered-markdown to style tables
     if html:
         html = f'<div class="rendered-markdown">{html}</div>'
+
+    schemes = get_config().ALLOWED_URL_SCHEMES
+
+    # Sanitize HTML
+    html = clean_html(html, schemes)
 
     return mark_safe(html)
 
@@ -185,3 +207,39 @@ def render_yaml(value):
         {{ data_dict|yaml }}
     """
     return yaml.dump(json.loads(json.dumps(value)))
+
+
+#
+# Time & date
+#
+
+@register.filter()
+def isodate(value):
+    if type(value) is datetime.date:
+        text = value.isoformat()
+        return mark_safe(f'<span title="{naturalday(value)}">{text}</span>')
+    elif type(value) is datetime.datetime:
+        local_value = localtime(value) if value.tzinfo else value
+        text = local_value.date().isoformat()
+        return mark_safe(f'<span title="{naturaltime(value)}">{text}</span>')
+    else:
+        return ''
+
+
+@register.filter()
+def isotime(value, spec='seconds'):
+    if type(value) is datetime.time:
+        return value.isoformat(timespec=spec)
+    if type(value) is datetime.datetime:
+        local_value = localtime(value) if value.tzinfo else value
+        return local_value.time().isoformat(timespec=spec)
+    return ''
+
+
+@register.filter()
+def isodatetime(value, spec='seconds'):
+    if type(value) is datetime.datetime:
+        text = f'{isodate(value)} {isotime(value, spec=spec)}'
+    else:
+        return ''
+    return mark_safe(f'<span title="{naturaltime(value)}">{text}</span>')

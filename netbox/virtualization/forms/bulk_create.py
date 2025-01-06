@@ -1,20 +1,23 @@
 from django import forms
+from django.utils.translation import gettext_lazy as _
 
-from utilities.forms import BootstrapMixin, ExpandableNameField, form_from_model
-from virtualization.models import VMInterface, VirtualMachine
+from utilities.forms import form_from_model
+from utilities.forms.fields import ExpandableNameField
+from virtualization.models import VirtualDisk, VMInterface, VirtualMachine
 
 __all__ = (
+    'VirtualDiskBulkCreateForm',
     'VMInterfaceBulkCreateForm',
 )
 
 
-class VirtualMachineBulkAddComponentForm(BootstrapMixin, forms.Form):
+class VirtualMachineBulkAddComponentForm(forms.Form):
     pk = forms.ModelMultipleChoiceField(
         queryset=VirtualMachine.objects.all(),
         widget=forms.MultipleHiddenInput()
     )
-    name_pattern = ExpandableNameField(
-        label='Name'
+    name = ExpandableNameField(
+        label=_('Name')
     )
 
     def clean_tags(self):
@@ -27,4 +30,11 @@ class VMInterfaceBulkCreateForm(
     form_from_model(VMInterface, ['enabled', 'mtu', 'description', 'tags']),
     VirtualMachineBulkAddComponentForm
 ):
-    pass
+    replication_fields = ('name',)
+
+
+class VirtualDiskBulkCreateForm(
+    form_from_model(VirtualDisk, ['size', 'description', 'tags']),
+    VirtualMachineBulkAddComponentForm
+):
+    replication_fields = ('name',)

@@ -8,6 +8,18 @@ The registry can be inspected by importing `registry` from `extras.registry`.
 
 ## Stores
 
+### `counter_fields`
+
+A dictionary mapping of models to foreign keys with which cached counter fields are associated.
+
+### `data_backends`
+
+A dictionary mapping data backend types to their respective classes. These are used to interact with [remote data sources](../models/core/datasource.md).
+
+### `denormalized_fields`
+
+Stores registration made using `netbox.denormalized.register()`. For each model, a list of related models and their field mappings is maintained to facilitate automatic updates.
+
 ### `model_features`
 
 A dictionary of particular features (e.g. custom fields) mapped to the NetBox models which support them, arranged by app. For example:
@@ -19,39 +31,36 @@ A dictionary of particular features (e.g. custom fields) mapped to the NetBox mo
         'dcim': ['site', 'rack', 'devicetype', ...],
         ...
     },
-    'webhooks': {
-        ...
+    'event_rules': {
+        'extras': ['configcontext', 'tag', ...],
+        'dcim': ['site', 'rack', 'devicetype', ...],
     },
     ...
 }
 ```
 
-### `plugin_menu_items`
+Supported model features are listed in the [features matrix](./models.md#features-matrix).
 
-Navigation menu items provided by NetBox plugins. Each plugin is registered as a key with the list of menu items it provides. An example:
+### `models`
 
-```python
-{
-    'Plugin A': (
-        <MenuItem>, <MenuItem>, <MenuItem>,
-    ),
-    'Plugin B': (
-        <MenuItem>, <MenuItem>, <MenuItem>,
-    ),
-}
-```
+This key lists all models which have been registered in NetBox which are not designated for private use. (Setting `_netbox_private` to True on a model excludes it from this list.) As with individual features under `model_features`, models are organized by app label.
 
-### `plugin_template_extensions`
+### `plugins`
 
-Plugin content that gets embedded into core NetBox templates. The store comprises NetBox models registered as dictionary keys, each pointing to a list of applicable template extension classes that exist. An example:
+This store maintains all registered items for plugins, such as navigation menus, template extensions, etc.
 
-```python
-{
-    'dcim.site': [
-        <TemplateExtension>, <TemplateExtension>, <TemplateExtension>,
-    ],
-    'dcim.rack': [
-        <TemplateExtension>, <TemplateExtension>,
-    ],
-}
-```
+### `request_processors`
+
+A list of context managers to invoke when processing a request e.g. in middleware or when executing a background job. Request processors can be registered with the `@register_request_processor` decorator.
+
+### `search`
+
+A dictionary mapping each model (identified by its app and label) to its search index class, if one has been registered for it.
+
+### `tables`
+
+A dictionary mapping table classes to lists of extra columns that have been registered by plugins using the `register_table_column()` utility function. Each column is defined as a tuple of name and column instance.
+
+### `views`
+
+A hierarchical mapping of registered views for each model. Mappings are added using the `register_model_view()` decorator, and URLs paths can be generated from these using `get_model_urls()`.

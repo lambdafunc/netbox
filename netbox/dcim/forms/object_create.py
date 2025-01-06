@@ -1,96 +1,124 @@
 from django import forms
+from django.utils.translation import gettext_lazy as _
 
 from dcim.models import *
 from netbox.forms import NetBoxModelForm
-from utilities.forms import (
-    BootstrapMixin, DynamicModelChoiceField, DynamicModelMultipleChoiceField, ExpandableNameField,
-)
+from utilities.forms.fields import DynamicModelChoiceField, DynamicModelMultipleChoiceField, ExpandableNameField
+from utilities.forms.rendering import FieldSet
+from utilities.forms.widgets import APISelect
+from . import model_forms
 
 __all__ = (
-    'ComponentTemplateCreateForm',
-    'DeviceComponentCreateForm',
+    'ComponentCreateForm',
+    'ConsolePortCreateForm',
+    'ConsolePortTemplateCreateForm',
+    'ConsoleServerPortCreateForm',
+    'ConsoleServerPortTemplateCreateForm',
+    'DeviceBayCreateForm',
+    'DeviceBayTemplateCreateForm',
     'FrontPortCreateForm',
     'FrontPortTemplateCreateForm',
+    'InterfaceCreateForm',
+    'InterfaceTemplateCreateForm',
     'InventoryItemCreateForm',
-    'ModularComponentTemplateCreateForm',
+    'InventoryItemTemplateCreateForm',
     'ModuleBayCreateForm',
     'ModuleBayTemplateCreateForm',
+    'PowerOutletCreateForm',
+    'PowerOutletTemplateCreateForm',
+    'PowerPortCreateForm',
+    'PowerPortTemplateCreateForm',
+    'RearPortCreateForm',
+    'RearPortTemplateCreateForm',
     'VirtualChassisCreateForm',
 )
 
 
-class ComponentCreateForm(BootstrapMixin, forms.Form):
+class ComponentCreateForm(forms.Form):
     """
-    Subclass this form when facilitating the creation of one or more device component or component templates based on
+    Subclass this form when facilitating the creation of one or more component or component template objects based on
     a name pattern.
     """
-    name_pattern = ExpandableNameField(
-        label='Name'
+    name = ExpandableNameField(
+        label=_('Name'),
     )
-    label_pattern = ExpandableNameField(
-        label='Label',
+    label = ExpandableNameField(
+        label=_('Label'),
         required=False,
-        help_text='Alphanumeric ranges are supported. (Must match the number of names being created.)'
+        help_text=_('Alphanumeric ranges are supported. (Must match the number of objects being created.)')
     )
+
+    # Identify the fields which support replication (i.e. ExpandableNameFields). This is referenced by
+    # ComponentCreateView when creating objects.
+    replication_fields = ('name', 'label')
 
     def clean(self):
         super().clean()
 
-        # Validate that all patterned fields generate an equal number of values
-        patterned_fields = [
-            field_name for field_name in self.fields if field_name.endswith('_pattern')
-        ]
-        pattern_count = len(self.cleaned_data['name_pattern'])
-        for field_name in patterned_fields:
+        # Validate that all replication fields generate an equal number of values
+        if not (patterns := self.cleaned_data.get(self.replication_fields[0])):
+            return
+
+        pattern_count = len(patterns)
+        for field_name in self.replication_fields:
             value_count = len(self.cleaned_data[field_name])
             if self.cleaned_data[field_name] and value_count != pattern_count:
                 raise forms.ValidationError({
-                    field_name: f'The provided pattern specifies {value_count} values, but {pattern_count} are '
-                                f'expected.'
+                    field_name: _(
+                        "The provided pattern specifies {value_count} values, but {pattern_count} are expected."
+                    ).format(value_count=value_count, pattern_count=pattern_count)
                 }, code='label_pattern_mismatch')
 
 
-class ComponentTemplateCreateForm(ComponentCreateForm):
-    """
-    Creation form for component templates that can be assigned only to a DeviceType.
-    """
-    device_type = DynamicModelChoiceField(
-        queryset=DeviceType.objects.all(),
-    )
-    field_order = ('device_type', 'name_pattern', 'label_pattern')
+#
+# Device component templates
+#
+
+class ConsolePortTemplateCreateForm(ComponentCreateForm, model_forms.ConsolePortTemplateForm):
+
+    class Meta(model_forms.ConsolePortTemplateForm.Meta):
+        exclude = ('name', 'label')
 
 
-class ModularComponentTemplateCreateForm(ComponentCreateForm):
-    """
-    Creation form for component templates that can be assigned to either a DeviceType *or* a ModuleType.
-    """
-    device_type = DynamicModelChoiceField(
-        queryset=DeviceType.objects.all(),
-        required=False
-    )
-    module_type = DynamicModelChoiceField(
-        queryset=ModuleType.objects.all(),
-        required=False
-    )
-    field_order = ('device_type', 'module_type', 'name_pattern', 'label_pattern')
+class ConsoleServerPortTemplateCreateForm(ComponentCreateForm, model_forms.ConsoleServerPortTemplateForm):
+
+    class Meta(model_forms.ConsoleServerPortTemplateForm.Meta):
+        exclude = ('name', 'label')
 
 
-class DeviceComponentCreateForm(ComponentCreateForm):
-    device = DynamicModelChoiceField(
-        queryset=Device.objects.all()
-    )
-    field_order = ('device', 'name_pattern', 'label_pattern')
+class PowerPortTemplateCreateForm(ComponentCreateForm, model_forms.PowerPortTemplateForm):
+
+    class Meta(model_forms.PowerPortTemplateForm.Meta):
+        exclude = ('name', 'label')
 
 
-class FrontPortTemplateCreateForm(ModularComponentTemplateCreateForm):
-    rear_port_set = forms.MultipleChoiceField(
+class PowerOutletTemplateCreateForm(ComponentCreateForm, model_forms.PowerOutletTemplateForm):
+
+    class Meta(model_forms.PowerOutletTemplateForm.Meta):
+        exclude = ('name', 'label')
+
+
+class InterfaceTemplateCreateForm(ComponentCreateForm, model_forms.InterfaceTemplateForm):
+
+    class Meta(model_forms.InterfaceTemplateForm.Meta):
+        exclude = ('name', 'label')
+
+
+class FrontPortTemplateCreateForm(ComponentCreateForm, model_forms.FrontPortTemplateForm):
+    rear_port = forms.MultipleChoiceField(
         choices=[],
-        label='Rear ports',
-        help_text='Select one rear port assignment for each front port being created.',
+        label=_('Rear ports'),
+        help_text=_('Select one rear port assignment for each front port being created.'),
+        widget=forms.SelectMultiple(attrs={'size': 6})
     )
-    field_order = (
-        'device_type', 'name_pattern', 'label_pattern', 'rear_port_set',
+
+    # Override fieldsets from FrontPortTemplateForm to omit rear_port_position
+    fieldsets = (
+        FieldSet('device_type', 'module_type', 'name', 'label', 'type', 'color', 'rear_port', 'description'),
     )
+
+    class Meta(model_forms.FrontPortTemplateForm.Meta):
+        exclude = ('name', 'label', 'rear_port', 'rear_port_position')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -122,12 +150,29 @@ class FrontPortTemplateCreateForm(ModularComponentTemplateCreateForm):
                     choices.append(
                         ('{}:{}'.format(rear_port.pk, i), '{}:{}'.format(rear_port.name, i))
                     )
-        self.fields['rear_port_set'].choices = choices
+        self.fields['rear_port'].choices = choices
+
+    def clean(self):
+
+        # Check that the number of FrontPortTemplates to be created matches the selected number of RearPortTemplate
+        # positions
+        frontport_count = len(self.cleaned_data['name'])
+        rearport_count = len(self.cleaned_data['rear_port'])
+        if frontport_count != rearport_count:
+            raise forms.ValidationError({
+                'rear_port': _(
+                    "The number of front port templates to be created ({frontport_count}) must match the selected "
+                    "number of rear port positions ({rearport_count})."
+                ).format(
+                    frontport_count=frontport_count,
+                    rearport_count=rearport_count
+                )
+            })
 
     def get_iterative_data(self, iteration):
 
         # Assign rear port and position from selected set
-        rear_port, position = self.cleaned_data['rear_port_set'][iteration].split(':')
+        rear_port, position = self.cleaned_data['rear_port'][iteration].split(':')
 
         return {
             'rear_port': int(rear_port),
@@ -135,22 +180,108 @@ class FrontPortTemplateCreateForm(ModularComponentTemplateCreateForm):
         }
 
 
-class FrontPortCreateForm(DeviceComponentCreateForm):
-    rear_port_set = forms.MultipleChoiceField(
+class RearPortTemplateCreateForm(ComponentCreateForm, model_forms.RearPortTemplateForm):
+
+    class Meta(model_forms.RearPortTemplateForm.Meta):
+        exclude = ('name', 'label')
+
+
+class DeviceBayTemplateCreateForm(ComponentCreateForm, model_forms.DeviceBayTemplateForm):
+
+    class Meta(model_forms.DeviceBayTemplateForm.Meta):
+        exclude = ('name', 'label')
+
+
+class ModuleBayTemplateCreateForm(ComponentCreateForm, model_forms.ModuleBayTemplateForm):
+    position = ExpandableNameField(
+        label=_('Position'),
+        required=False,
+        help_text=_('Alphanumeric ranges are supported. (Must match the number of objects being created.)')
+    )
+    replication_fields = ('name', 'label', 'position')
+
+    class Meta(model_forms.ModuleBayTemplateForm.Meta):
+        exclude = ('name', 'label', 'position')
+
+
+class InventoryItemTemplateCreateForm(ComponentCreateForm, model_forms.InventoryItemTemplateForm):
+
+    class Meta(model_forms.InventoryItemTemplateForm.Meta):
+        exclude = ('name', 'label')
+
+
+#
+# Device components
+#
+
+class ConsolePortCreateForm(ComponentCreateForm, model_forms.ConsolePortForm):
+
+    class Meta(model_forms.ConsolePortForm.Meta):
+        exclude = ('name', 'label')
+
+
+class ConsoleServerPortCreateForm(ComponentCreateForm, model_forms.ConsoleServerPortForm):
+
+    class Meta(model_forms.ConsoleServerPortForm.Meta):
+        exclude = ('name', 'label')
+
+
+class PowerPortCreateForm(ComponentCreateForm, model_forms.PowerPortForm):
+
+    class Meta(model_forms.PowerPortForm.Meta):
+        exclude = ('name', 'label')
+
+
+class PowerOutletCreateForm(ComponentCreateForm, model_forms.PowerOutletForm):
+
+    class Meta(model_forms.PowerOutletForm.Meta):
+        exclude = ('name', 'label')
+
+
+class InterfaceCreateForm(ComponentCreateForm, model_forms.InterfaceForm):
+
+    class Meta(model_forms.InterfaceForm.Meta):
+        exclude = ('name', 'label')
+
+
+class FrontPortCreateForm(ComponentCreateForm, model_forms.FrontPortForm):
+    device = DynamicModelChoiceField(
+        label=_('Device'),
+        queryset=Device.objects.all(),
+        selector=True,
+        widget=APISelect(
+            # TODO: Clean up the application of HTMXSelect attributes
+            attrs={
+                'hx-get': '.',
+                'hx-include': '#form_fields',
+                'hx-target': '#form_fields',
+            }
+        )
+    )
+    rear_port = forms.MultipleChoiceField(
         choices=[],
-        label='Rear ports',
-        help_text='Select one rear port assignment for each front port being created.',
+        label=_('Rear ports'),
+        help_text=_('Select one rear port assignment for each front port being created.'),
+        widget=forms.SelectMultiple(attrs={'size': 6})
     )
-    field_order = (
-        'device', 'name_pattern', 'label_pattern', 'rear_port_set',
+
+    # Override fieldsets from FrontPortForm to omit rear_port_position
+    fieldsets = (
+        FieldSet(
+            'device', 'module', 'name', 'label', 'type', 'color', 'rear_port', 'mark_connected', 'description', 'tags',
+        ),
     )
+
+    class Meta(model_forms.FrontPortForm.Meta):
+        exclude = ('name', 'label', 'rear_port', 'rear_port_position')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        device = Device.objects.get(
-            pk=self.initial.get('device') or self.data.get('device')
-        )
+        if device_id := self.data.get('device') or self.initial.get('device'):
+            device = Device.objects.get(pk=device_id)
+        else:
+            return
 
         # Determine which rear port positions are occupied. These will be excluded from the list of available
         # mappings.
@@ -168,12 +299,28 @@ class FrontPortCreateForm(DeviceComponentCreateForm):
                     choices.append(
                         ('{}:{}'.format(rear_port.pk, i), '{}:{}'.format(rear_port.name, i))
                     )
-        self.fields['rear_port_set'].choices = choices
+        self.fields['rear_port'].choices = choices
+
+    def clean(self):
+
+        # Check that the number of FrontPorts to be created matches the selected number of RearPort positions
+        frontport_count = len(self.cleaned_data['name'])
+        rearport_count = len(self.cleaned_data['rear_port'])
+        if frontport_count != rearport_count:
+            raise forms.ValidationError({
+                'rear_port': _(
+                    "The number of front ports to be created ({frontport_count}) must match the selected number of "
+                    "rear port positions ({rearport_count})."
+                ).format(
+                    frontport_count=frontport_count,
+                    rearport_count=rearport_count
+                )
+            })
 
     def get_iterative_data(self, iteration):
 
         # Assign rear port and position from selected set
-        rear_port, position = self.cleaned_data['rear_port_set'][iteration].split(':')
+        rear_port, position = self.cleaned_data['rear_port'][iteration].split(':')
 
         return {
             'rear_port': int(rear_port),
@@ -181,31 +328,43 @@ class FrontPortCreateForm(DeviceComponentCreateForm):
         }
 
 
-class ModuleBayTemplateCreateForm(ComponentTemplateCreateForm):
-    position_pattern = ExpandableNameField(
-        label='Position',
+class RearPortCreateForm(ComponentCreateForm, model_forms.RearPortForm):
+
+    class Meta(model_forms.RearPortForm.Meta):
+        exclude = ('name', 'label')
+
+
+class DeviceBayCreateForm(ComponentCreateForm, model_forms.DeviceBayForm):
+
+    class Meta(model_forms.DeviceBayForm.Meta):
+        exclude = ('name', 'label')
+
+
+class ModuleBayCreateForm(ComponentCreateForm, model_forms.ModuleBayForm):
+    position = ExpandableNameField(
+        label=_('Position'),
         required=False,
-        help_text='Alphanumeric ranges are supported. (Must match the number of names being created.)'
+        help_text=_('Alphanumeric ranges are supported. (Must match the number of objects being created.)')
     )
-    field_order = ('device_type', 'name_pattern', 'label_pattern', 'position_pattern')
+    replication_fields = ('name', 'label', 'position')
+
+    class Meta(model_forms.ModuleBayForm.Meta):
+        exclude = ('name', 'label', 'position')
 
 
-class ModuleBayCreateForm(DeviceComponentCreateForm):
-    position_pattern = ExpandableNameField(
-        label='Position',
-        required=False,
-        help_text='Alphanumeric ranges are supported. (Must match the number of names being created.)'
-    )
-    field_order = ('device', 'name_pattern', 'label_pattern', 'position_pattern')
+class InventoryItemCreateForm(ComponentCreateForm, model_forms.InventoryItemForm):
+
+    class Meta(model_forms.InventoryItemForm.Meta):
+        exclude = ('name', 'label')
 
 
-class InventoryItemCreateForm(ComponentCreateForm):
-    # Device is assigned by the model form
-    field_order = ('name_pattern', 'label_pattern')
-
+#
+# Virtual chassis
+#
 
 class VirtualChassisCreateForm(NetBoxModelForm):
     region = DynamicModelChoiceField(
+        label=_('Region'),
         queryset=Region.objects.all(),
         required=False,
         initial_params={
@@ -213,6 +372,7 @@ class VirtualChassisCreateForm(NetBoxModelForm):
         }
     )
     site_group = DynamicModelChoiceField(
+        label=_('Site group'),
         queryset=SiteGroup.objects.all(),
         required=False,
         initial_params={
@@ -220,6 +380,7 @@ class VirtualChassisCreateForm(NetBoxModelForm):
         }
     )
     site = DynamicModelChoiceField(
+        label=_('Site'),
         queryset=Site.objects.all(),
         required=False,
         query_params={
@@ -228,6 +389,7 @@ class VirtualChassisCreateForm(NetBoxModelForm):
         }
     )
     rack = DynamicModelChoiceField(
+        label=_('Rack'),
         queryset=Rack.objects.all(),
         required=False,
         null_option='None',
@@ -236,6 +398,7 @@ class VirtualChassisCreateForm(NetBoxModelForm):
         }
     )
     members = DynamicModelMultipleChoiceField(
+        label=_('Members'),
         queryset=Device.objects.all(),
         required=False,
         query_params={
@@ -244,21 +407,24 @@ class VirtualChassisCreateForm(NetBoxModelForm):
         }
     )
     initial_position = forms.IntegerField(
+        label=_('Initial position'),
         initial=1,
         required=False,
-        help_text='Position of the first member device. Increases by one for each additional member.'
+        help_text=_('Position of the first member device. Increases by one for each additional member.')
     )
 
     class Meta:
         model = VirtualChassis
         fields = [
-            'name', 'domain', 'region', 'site_group', 'site', 'rack', 'members', 'initial_position', 'tags',
+            'name', 'domain', 'description', 'region', 'site_group', 'site', 'rack', 'members', 'initial_position', 'tags',
         ]
 
     def clean(self):
+        super().clean()
+
         if self.cleaned_data['members'] and self.cleaned_data['initial_position'] is None:
             raise forms.ValidationError({
-                'initial_position': "A position must be specified for the first VC member."
+                'initial_position': _("A position must be specified for the first VC member.")
             })
 
     def save(self, *args, **kwargs):

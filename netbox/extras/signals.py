@@ -1,122 +1,18 @@
-import importlib
-import logging
-
 from django.contrib.contenttypes.models import ContentType
 from django.db.models.signals import m2m_changed, post_save, pre_delete
-from django.dispatch import receiver, Signal
-from django_prometheus.models import model_deletes, model_inserts, model_updates
+from django.dispatch import receiver
 
-from extras.validators import CustomValidator
-from netbox import thread_locals
+from core.events import *
+from core.models import ObjectType
+from core.signals import job_end, job_start
+from extras.events import process_event_rules
+from extras.models import EventRule, Notification, Subscription
 from netbox.config import get_config
-from netbox.request_context import get_request
+from netbox.registry import registry
 from netbox.signals import post_clean
-from .choices import ObjectChangeActionChoices
-from .models import ConfigRevision, CustomField, ObjectChange
-from .webhooks import enqueue_object, get_snapshots, serialize_for_webhook
-
-#
-# Change logging/webhooks
-#
-
-# Define a custom signal that can be sent to clear any queued webhooks
-clear_webhooks = Signal()
-
-
-def handle_changed_object(sender, instance, **kwargs):
-    """
-    Fires when an object is created or updated.
-    """
-    if not hasattr(instance, 'to_objectchange'):
-        return
-
-    request = get_request()
-    m2m_changed = False
-
-    def is_same_object(instance, webhook_data):
-        return (
-            ContentType.objects.get_for_model(instance) == webhook_data['content_type'] and
-            instance.pk == webhook_data['object_id'] and
-            request.id == webhook_data['request_id']
-        )
-
-    # Determine the type of change being made
-    if kwargs.get('created'):
-        action = ObjectChangeActionChoices.ACTION_CREATE
-    elif 'created' in kwargs:
-        action = ObjectChangeActionChoices.ACTION_UPDATE
-    elif kwargs.get('action') in ['post_add', 'post_remove'] and kwargs['pk_set']:
-        # m2m_changed with objects added or removed
-        m2m_changed = True
-        action = ObjectChangeActionChoices.ACTION_UPDATE
-    else:
-        return
-
-    # Record an ObjectChange if applicable
-    if hasattr(instance, 'to_objectchange'):
-        if m2m_changed:
-            ObjectChange.objects.filter(
-                changed_object_type=ContentType.objects.get_for_model(instance),
-                changed_object_id=instance.pk,
-                request_id=request.id
-            ).update(
-                postchange_data=instance.to_objectchange(action).postchange_data
-            )
-        else:
-            objectchange = instance.to_objectchange(action)
-            objectchange.user = request.user
-            objectchange.request_id = request.id
-            objectchange.save()
-
-    # If this is an M2M change, update the previously queued webhook (from post_save)
-    webhook_queue = thread_locals.webhook_queue
-    if m2m_changed and webhook_queue and is_same_object(instance, webhook_queue[-1]):
-        instance.refresh_from_db()  # Ensure that we're working with fresh M2M assignments
-        webhook_queue[-1]['data'] = serialize_for_webhook(instance)
-        webhook_queue[-1]['snapshots']['postchange'] = get_snapshots(instance, action)['postchange']
-    else:
-        enqueue_object(webhook_queue, instance, request.user, request.id, action)
-
-    # Increment metric counters
-    if action == ObjectChangeActionChoices.ACTION_CREATE:
-        model_inserts.labels(instance._meta.model_name).inc()
-    elif action == ObjectChangeActionChoices.ACTION_UPDATE:
-        model_updates.labels(instance._meta.model_name).inc()
-
-
-def handle_deleted_object(sender, instance, **kwargs):
-    """
-    Fires when an object is deleted.
-    """
-    if not hasattr(instance, 'to_objectchange'):
-        return
-
-    request = get_request()
-
-    # Record an ObjectChange if applicable
-    if hasattr(instance, 'to_objectchange'):
-        objectchange = instance.to_objectchange(ObjectChangeActionChoices.ACTION_DELETE)
-        objectchange.user = request.user
-        objectchange.request_id = request.id
-        objectchange.save()
-
-    # Enqueue webhooks
-    webhook_queue = thread_locals.webhook_queue
-    enqueue_object(webhook_queue, instance, request.user, request.id, ObjectChangeActionChoices.ACTION_DELETE)
-
-    # Increment metric counters
-    model_deletes.labels(instance._meta.model_name).inc()
-
-
-def clear_webhook_queue(sender, **kwargs):
-    """
-    Delete any queued webhooks (e.g. because of an aborted bulk transaction)
-    """
-    logger = logging.getLogger('webhooks')
-    webhook_queue = thread_locals.webhook_queue
-
-    logger.info(f"Clearing {len(webhook_queue)} queued webhooks ({sender})")
-    webhook_queue.clear()
+from utilities.exceptions import AbortRequest
+from .models import CustomField, TaggedItem
+from .utils import run_validators
 
 
 #
@@ -151,13 +47,13 @@ def handle_cf_deleted(instance, **kwargs):
     """
     Handle the cleanup of old custom field data when a CustomField is deleted.
     """
-    instance.remove_stale_data(instance.content_types.all())
+    instance.remove_stale_data(instance.object_types.all())
 
 
 post_save.connect(handle_cf_renamed, sender=CustomField)
 pre_delete.connect(handle_cf_deleted, sender=CustomField)
-m2m_changed.connect(handle_cf_added_obj_types, sender=CustomField.content_types.through)
-m2m_changed.connect(handle_cf_removed_obj_types, sender=CustomField.content_types.through)
+m2m_changed.connect(handle_cf_added_obj_types, sender=CustomField.object_types.through)
+m2m_changed.connect(handle_cf_removed_obj_types, sender=CustomField.object_types.through)
 
 
 #
@@ -165,32 +61,114 @@ m2m_changed.connect(handle_cf_removed_obj_types, sender=CustomField.content_type
 #
 
 @receiver(post_clean)
-def run_custom_validators(sender, instance, **kwargs):
-    config = get_config()
+def run_save_validators(sender, instance, **kwargs):
+    """
+    Run any custom validation rules for the model prior to calling save().
+    """
     model_name = f'{sender._meta.app_label}.{sender._meta.model_name}'
-    validators = config.CUSTOM_VALIDATORS.get(model_name, [])
+    validators = get_config().CUSTOM_VALIDATORS.get(model_name, [])
 
-    for validator in validators:
-
-        # Loading a validator class by dotted path
-        if type(validator) is str:
-            module, cls = validator.rsplit('.', 1)
-            validator = getattr(importlib.import_module(module), cls)()
-
-        # Constructing a new instance on the fly from a ruleset
-        elif type(validator) is dict:
-            validator = CustomValidator(validator)
-
-        validator(instance)
+    run_validators(instance, validators)
 
 
 #
-# Dynamic configuration
+# Tags
 #
 
-@receiver(post_save, sender=ConfigRevision)
-def update_config(sender, instance, **kwargs):
+@receiver(m2m_changed, sender=TaggedItem)
+def validate_assigned_tags(sender, instance, action, model, pk_set, **kwargs):
     """
-    Update the cached NetBox configuration when a new ConfigRevision is created.
+    Validate that any Tags being assigned to the instance are not restricted to non-applicable object types.
     """
-    instance.activate()
+    if action != 'pre_add':
+        return
+    ct = ObjectType.objects.get_for_model(instance)
+    # Retrieve any applied Tags that are restricted to certain object types
+    for tag in model.objects.filter(pk__in=pk_set, object_types__isnull=False).prefetch_related('object_types'):
+        if ct not in tag.object_types.all():
+            raise AbortRequest(f"Tag {tag} cannot be assigned to {ct.model} objects.")
+
+
+#
+# Event rules
+#
+
+@receiver(job_start)
+def process_job_start_event_rules(sender, **kwargs):
+    """
+    Process event rules for jobs starting.
+    """
+    event_rules = EventRule.objects.filter(
+        event_types__contains=[JOB_STARTED],
+        enabled=True,
+        object_types=sender.object_type
+    )
+    username = sender.user.username if sender.user else None
+    process_event_rules(
+        event_rules=event_rules,
+        object_type=sender.object_type,
+        event_type=JOB_STARTED,
+        data=sender.data,
+        username=username
+    )
+
+
+@receiver(job_end)
+def process_job_end_event_rules(sender, **kwargs):
+    """
+    Process event rules for jobs terminating.
+    """
+    event_rules = EventRule.objects.filter(
+        event_types__contains=[JOB_COMPLETED],
+        enabled=True,
+        object_types=sender.object_type
+    )
+    username = sender.user.username if sender.user else None
+    process_event_rules(
+        event_rules=event_rules,
+        object_type=sender.object_type,
+        event_type=JOB_COMPLETED,
+        data=sender.data,
+        username=username
+    )
+
+
+#
+# Notifications
+#
+
+@receiver((post_save, pre_delete))
+def notify_object_changed(sender, instance, **kwargs):
+    # Skip for newly-created objects
+    if kwargs.get('created'):
+        return
+
+    # Determine event type
+    if 'created' in kwargs:
+        event_type = OBJECT_UPDATED
+    else:
+        event_type = OBJECT_DELETED
+
+    # Skip unsupported object types
+    ct = ContentType.objects.get_for_model(instance)
+    if ct.model not in registry['model_features']['notifications'].get(ct.app_label, []):
+        return
+
+    # Find all subscribed Users
+    subscribed_users = Subscription.objects.filter(object_type=ct, object_id=instance.pk).values_list('user', flat=True)
+    if not subscribed_users:
+        return
+
+    # Delete any existing Notifications for the object
+    Notification.objects.filter(object_type=ct, object_id=instance.pk, user__in=subscribed_users).delete()
+
+    # Create Notifications for Subscribers
+    Notification.objects.bulk_create([
+        Notification(
+            user_id=user,
+            object=instance,
+            object_repr=Notification.get_object_repr(instance),
+            event_type=event_type
+        )
+        for user in subscribed_users
+    ])

@@ -1,13 +1,12 @@
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
-from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 
-from netbox.models import ChangeLoggedModel, NetBoxModel
-from netbox.models.features import WebhooksMixin
 from ipam.choices import *
 from ipam.constants import *
+from netbox.models import ChangeLoggedModel, PrimaryModel
 
 __all__ = (
     'FHRPGroup',
@@ -15,14 +14,20 @@ __all__ = (
 )
 
 
-class FHRPGroup(NetBoxModel):
+class FHRPGroup(PrimaryModel):
     """
     A grouping of next hope resolution protocol (FHRP) peers. (For instance, VRRP or HSRP.)
     """
     group_id = models.PositiveSmallIntegerField(
-        verbose_name='Group ID'
+        verbose_name=_('group ID')
+    )
+    name = models.CharField(
+        verbose_name=_('name'),
+        max_length=100,
+        blank=True
     )
     protocol = models.CharField(
+        verbose_name=_('protocol'),
         max_length=50,
         choices=FHRPGroupProtocolChoices
     )
@@ -30,16 +35,12 @@ class FHRPGroup(NetBoxModel):
         max_length=50,
         choices=FHRPGroupAuthTypeChoices,
         blank=True,
-        verbose_name='Authentication type'
+        verbose_name=_('authentication type')
     )
     auth_key = models.CharField(
         max_length=255,
         blank=True,
-        verbose_name='Authentication key'
-    )
-    description = models.CharField(
-        max_length=200,
-        blank=True
+        verbose_name=_('authentication key')
     )
     ip_addresses = GenericRelation(
         to='ipam.IPAddress',
@@ -48,14 +49,19 @@ class FHRPGroup(NetBoxModel):
         related_query_name='fhrpgroup'
     )
 
-    clone_fields = ('protocol', 'auth_type', 'auth_key')
+    clone_fields = ('protocol', 'auth_type', 'auth_key', 'description')
 
     class Meta:
         ordering = ['protocol', 'group_id', 'pk']
-        verbose_name = 'FHRP group'
+        verbose_name = _('FHRP group')
+        verbose_name_plural = _('FHRP groups')
 
     def __str__(self):
-        name = f'{self.get_protocol_display()}: {self.group_id}'
+        name = ''
+        if self.name:
+            name = f'{self.name} '
+
+        name += f'{self.get_protocol_display()}: {self.group_id}'
 
         # Append the first assigned IP addresses (if any) to serve as an additional identifier
         if self.pk:
@@ -69,9 +75,9 @@ class FHRPGroup(NetBoxModel):
         return reverse('ipam:fhrpgroup', args=[self.pk])
 
 
-class FHRPGroupAssignment(WebhooksMixin, ChangeLoggedModel):
+class FHRPGroupAssignment(ChangeLoggedModel):
     interface_type = models.ForeignKey(
-        to=ContentType,
+        to='contenttypes.ContentType',
         on_delete=models.CASCADE
     )
     interface_id = models.PositiveBigIntegerField()
@@ -84,6 +90,7 @@ class FHRPGroupAssignment(WebhooksMixin, ChangeLoggedModel):
         on_delete=models.CASCADE
     )
     priority = models.PositiveSmallIntegerField(
+        verbose_name=_('priority'),
         validators=(
             MinValueValidator(FHRPGROUPASSIGNMENT_PRIORITY_MIN),
             MaxValueValidator(FHRPGROUPASSIGNMENT_PRIORITY_MAX)
@@ -94,8 +101,17 @@ class FHRPGroupAssignment(WebhooksMixin, ChangeLoggedModel):
 
     class Meta:
         ordering = ('-priority', 'pk')
-        unique_together = ('interface_type', 'interface_id', 'group')
-        verbose_name = 'FHRP group assignment'
+        indexes = (
+            models.Index(fields=('interface_type', 'interface_id')),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=('interface_type', 'interface_id', 'group'),
+                name='%(app_label)s_%(class)s_unique_interface_group'
+            ),
+        )
+        verbose_name = _('FHRP group assignment')
+        verbose_name_plural = _('FHRP group assignments')
 
     def __str__(self):
         return f'{self.interface}: {self.group} ({self.priority})'

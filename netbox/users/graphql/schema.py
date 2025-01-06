@@ -1,12 +1,15 @@
-import graphene
+from typing import List
 
-from netbox.graphql.fields import ObjectField, ObjectListField
+import strawberry
+import strawberry_django
+
 from .types import *
 
 
-class UsersQuery(graphene.ObjectType):
-    group = ObjectField(GroupType)
-    group_list = ObjectListField(GroupType)
+@strawberry.type(name="Query")
+class UsersQuery:
+    group: GroupType = strawberry_django.field()
+    group_list: List[GroupType] = strawberry_django.field()
 
-    user = ObjectField(UserType)
-    user_list = ObjectListField(UserType)
+    user: UserType = strawberry_django.field()
+    user_list: List[UserType] = strawberry_django.field()

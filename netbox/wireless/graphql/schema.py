@@ -1,15 +1,18 @@
-import graphene
+from typing import List
 
-from netbox.graphql.fields import ObjectField, ObjectListField
+import strawberry
+import strawberry_django
+
 from .types import *
 
 
-class WirelessQuery(graphene.ObjectType):
-    wireless_lan = ObjectField(WirelessLANType)
-    wireless_lan_list = ObjectListField(WirelessLANType)
+@strawberry.type(name="Query")
+class WirelessQuery:
+    wireless_lan: WirelessLANType = strawberry_django.field()
+    wireless_lan_list: List[WirelessLANType] = strawberry_django.field()
 
-    wireless_lan_group = ObjectField(WirelessLANGroupType)
-    wireless_lan_group_list = ObjectListField(WirelessLANGroupType)
+    wireless_lan_group: WirelessLANGroupType = strawberry_django.field()
+    wireless_lan_group_list: List[WirelessLANGroupType] = strawberry_django.field()
 
-    wireless_link = ObjectField(WirelessLinkType)
-    wireless_link_list = ObjectListField(WirelessLinkType)
+    wireless_link: WirelessLinkType = strawberry_django.field()
+    wireless_link_list: List[WirelessLinkType] = strawberry_django.field()

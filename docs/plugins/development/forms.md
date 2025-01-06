@@ -4,27 +4,29 @@
 
 NetBox provides several base form classes for use by plugins.
 
-| Form Class                | Purpose                              |
-|---------------------------|--------------------------------------|
-| `NetBoxModelForm`         | Create/edit individual objects       |
-| `NetBoxModelCSVForm`      | Bulk import objects from CSV data    |
-| `NetBoxModelBulkEditForm` | Edit multiple objects simultaneously |
+| Form Class                 | Purpose                              |
+|----------------------------|--------------------------------------|
+| `NetBoxModelForm`          | Create/edit individual objects       |
+| `NetBoxModelImportForm`    | Bulk import objects from CSV data    |
+| `NetBoxModelBulkEditForm`  | Edit multiple objects simultaneously |
 | `NetBoxModelFilterSetForm` | Filter objects within a list view   |
 
 ### `NetBoxModelForm`
 
 This is the base form for creating and editing NetBox models. It extends Django's ModelForm to add support for tags and custom fields.
 
-| Attribute   | Description                                                 |
-|-------------|-------------------------------------------------------------|
-| `fieldsets` | A tuple of two-tuples defining the form's layout (optional) |
+| Attribute   | Description                                                                           |
+|-------------|---------------------------------------------------------------------------------------|
+| `fieldsets` | A tuple of `FieldSet` instances which control how form fields are rendered (optional) |
 
 **Example**
 
 ```python
+from django.utils.translation import gettext_lazy as _
 from dcim.models import Site
 from netbox.forms import NetBoxModelForm
 from utilities.forms.fields import CommentField, DynamicModelChoiceField
+from utilities.forms.rendering import FieldSet
 from .models import MyModel
 
 class MyModelForm(NetBoxModelForm):
@@ -33,8 +35,8 @@ class MyModelForm(NetBoxModelForm):
     )
     comments = CommentField()
     fieldsets = (
-        ('Model Stuff', ('name', 'status', 'site', 'tags')),
-        ('Tenancy', ('tenant_group', 'tenant')),
+        FieldSet('name', 'status', 'site', 'tags', name=_('Model Stuff')),
+        FieldSet('tenant_group', 'tenant', name=_('Tenancy')),
     )
 
     class Meta:
@@ -45,23 +47,25 @@ class MyModelForm(NetBoxModelForm):
 !!! tip "Comment fields"
     If your form has a `comments` field, there's no need to list it; this will always appear last on the page.
 
-### `NetBoxModelCSVForm`
+### `NetBoxModelImportForm`
 
-This form facilitates the bulk import of new objects from CSV data. As with model forms, you'll need to declare a `Meta` subclass specifying the associated `model` and `fields`. NetBox also provides several form fields suitable for import various types of CSV data, listed below.
+This form facilitates the bulk import of new objects from CSV, JSON, or YAML data. As with model forms, you'll need to declare a `Meta` subclass specifying the associated `model` and `fields`. NetBox also provides several form fields suitable for import various types of CSV data, listed below.
 
 **Example**
 
 ```python
+from django.utils.translation import gettext_lazy as _
 from dcim.models import Site
-from netbox.forms import NetBoxModelCSVForm
+from netbox.forms import NetBoxModelImportForm
 from utilities.forms import CSVModelChoiceField
 from .models import MyModel
 
-class MyModelCSVForm(NetBoxModelCSVForm):
+
+class MyModelImportForm(NetBoxModelImportForm):
     site = CSVModelChoiceField(
         queryset=Site.objects.all(),
         to_field_name='name',
-        help_text='Assigned site'
+        help_text=_('Assigned site')
     )
 
     class Meta:
@@ -76,19 +80,22 @@ This form facilitates editing multiple objects in bulk. Unlike a model form, thi
 | Attribute         | Description                                                                                 |
 |-------------------|---------------------------------------------------------------------------------------------|
 | `model`           | The model of object being edited                                                            |
-| `fieldsets`       | A tuple of two-tuples defining the form's layout (optional)                                 |
+| `fieldsets`       | A tuple of `FieldSet` instances which control how form fields are rendered (optional)       |
 | `nullable_fields` | A tuple of fields which can be nullified (set to empty) using the bulk edit form (optional) |
 
 **Example**
 
 ```python
 from django import forms
+from django.utils.translation import gettext_lazy as _
 from dcim.models import Site
-from netbox.forms import NetBoxModelCSVForm
+from netbox.forms import NetBoxModelBulkEditForm
 from utilities.forms import CommentField, DynamicModelChoiceField
+from utilities.forms.rendering import FieldSet
 from .models import MyModel, MyModelStatusChoices
 
-class MyModelEditForm(NetBoxModelCSVForm):
+
+class MyModelBulkEditForm(NetBoxModelBulkEditForm):
     name = forms.CharField(
         required=False
     )
@@ -104,7 +111,7 @@ class MyModelEditForm(NetBoxModelCSVForm):
 
     model = MyModel
     fieldsets = (
-        ('Model Stuff', ('name', 'status', 'site')),
+        FieldSet('name', 'status', 'site', name=_('Model Stuff')),
     )
     nullable_fields = ('site', 'comments')
 ```
@@ -113,10 +120,10 @@ class MyModelEditForm(NetBoxModelCSVForm):
 
 This form class is used to render a form expressly for filtering a list of objects. Its fields should correspond to filters defined on the model's filter set.
 
-| Attribute         | Description                                                 |
-|-------------------|-------------------------------------------------------------|
-| `model`           | The model of object being edited                            |
-| `fieldsets`       | A tuple of two-tuples defining the form's layout (optional) |
+| Attribute   | Description                                                                           |
+|-------------|---------------------------------------------------------------------------------------|
+| `model`     | The model of object being edited                                                      |
+| `fieldsets` | A tuple of `FieldSet` instances which control how form fields are rendered (optional) |
 
 **Example**
 
@@ -143,74 +150,74 @@ class MyModelFilterForm(NetBoxModelFilterSetForm):
 
 In addition to the [form fields provided by Django](https://docs.djangoproject.com/en/stable/ref/forms/fields/), NetBox provides several field classes for use within forms to handle specific types of data. These can be imported from `utilities.forms.fields` and are documented below.
 
-::: utilities.forms.ColorField
-    selection:
+::: utilities.forms.fields.ColorField
+    options:
       members: false
 
-::: utilities.forms.CommentField
-    selection:
+::: utilities.forms.fields.CommentField
+    options:
       members: false
 
-::: utilities.forms.JSONField
-    selection:
+::: utilities.forms.fields.JSONField
+    options:
       members: false
 
-::: utilities.forms.MACAddressField
-    selection:
+::: utilities.forms.fields.MACAddressField
+    options:
       members: false
 
-::: utilities.forms.SlugField
-    selection:
-      members: false
-
-## Choice Fields
-
-::: utilities.forms.ChoiceField
-    selection:
-      members: false
-
-::: utilities.forms.MultipleChoiceField
-    selection:
+::: utilities.forms.fields.SlugField
+    options:
       members: false
 
 ## Dynamic Object Fields
 
-::: utilities.forms.DynamicModelChoiceField
-    selection:
+::: utilities.forms.fields.DynamicModelChoiceField
+    options:
       members: false
 
-::: utilities.forms.DynamicModelMultipleChoiceField
-    selection:
+::: utilities.forms.fields.DynamicModelMultipleChoiceField
+    options:
       members: false
 
 ## Content Type Fields
 
-::: utilities.forms.ContentTypeChoiceField
-    selection:
+::: utilities.forms.fields.ContentTypeChoiceField
+    options:
       members: false
 
-::: utilities.forms.ContentTypeMultipleChoiceField
-    selection:
+::: utilities.forms.fields.ContentTypeMultipleChoiceField
+    options:
       members: false
 
 ## CSV Import Fields
 
-::: utilities.forms.CSVChoiceField
-    selection:
+::: utilities.forms.fields.CSVChoiceField
+    options:
       members: false
 
-::: utilities.forms.CSVMultipleChoiceField
-    selection:
+::: utilities.forms.fields.CSVMultipleChoiceField
+    options:
       members: false
 
-::: utilities.forms.CSVModelChoiceField
-    selection:
+::: utilities.forms.fields.CSVModelChoiceField
+    options:
       members: false
 
-::: utilities.forms.CSVContentTypeField
-    selection:
+::: utilities.forms.fields.CSVContentTypeField
+    options:
       members: false
 
-::: utilities.forms.CSVMultipleContentTypeField
-    selection:
+::: utilities.forms.fields.CSVMultipleContentTypeField
+    options:
       members: false
+
+## Form Rendering
+
+::: utilities.forms.rendering.FieldSet
+
+::: utilities.forms.rendering.InlineFields
+
+::: utilities.forms.rendering.TabbedGroups
+
+::: utilities.forms.rendering.ObjectAttribute

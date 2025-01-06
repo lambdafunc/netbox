@@ -1,30 +1,54 @@
-import graphene
+from typing import List
 
-from netbox.graphql.fields import ObjectField, ObjectListField
+import strawberry
+import strawberry_django
+
 from .types import *
 
 
-class ExtrasQuery(graphene.ObjectType):
-    config_context = ObjectField(ConfigContextType)
-    config_context_list = ObjectListField(ConfigContextType)
+@strawberry.type(name="Query")
+class ExtrasQuery:
+    config_context: ConfigContextType = strawberry_django.field()
+    config_context_list: List[ConfigContextType] = strawberry_django.field()
 
-    custom_field = ObjectField(CustomFieldType)
-    custom_field_list = ObjectListField(CustomFieldType)
+    config_template: ConfigTemplateType = strawberry_django.field()
+    config_template_list: List[ConfigTemplateType] = strawberry_django.field()
 
-    custom_link = ObjectField(CustomLinkType)
-    custom_link_list = ObjectListField(CustomLinkType)
+    custom_field: CustomFieldType = strawberry_django.field()
+    custom_field_list: List[CustomFieldType] = strawberry_django.field()
 
-    export_template = ObjectField(ExportTemplateType)
-    export_template_list = ObjectListField(ExportTemplateType)
+    custom_field_choice_set: CustomFieldChoiceSetType = strawberry_django.field()
+    custom_field_choice_set_list: List[CustomFieldChoiceSetType] = strawberry_django.field()
 
-    image_attachment = ObjectField(ImageAttachmentType)
-    image_attachment_list = ObjectListField(ImageAttachmentType)
+    custom_link: CustomLinkType = strawberry_django.field()
+    custom_link_list: List[CustomLinkType] = strawberry_django.field()
 
-    journal_entry = ObjectField(JournalEntryType)
-    journal_entry_list = ObjectListField(JournalEntryType)
+    export_template: ExportTemplateType = strawberry_django.field()
+    export_template_list: List[ExportTemplateType] = strawberry_django.field()
 
-    tag = ObjectField(TagType)
-    tag_list = ObjectListField(TagType)
+    image_attachment: ImageAttachmentType = strawberry_django.field()
+    image_attachment_list: List[ImageAttachmentType] = strawberry_django.field()
 
-    webhook = ObjectField(WebhookType)
-    webhook_list = ObjectListField(WebhookType)
+    saved_filter: SavedFilterType = strawberry_django.field()
+    saved_filter_list: List[SavedFilterType] = strawberry_django.field()
+
+    journal_entry: JournalEntryType = strawberry_django.field()
+    journal_entry_list: List[JournalEntryType] = strawberry_django.field()
+
+    notification: NotificationType = strawberry_django.field()
+    notification_list: List[NotificationType] = strawberry_django.field()
+
+    notification_group: NotificationGroupType = strawberry_django.field()
+    notification_group_list: List[NotificationGroupType] = strawberry_django.field()
+
+    subscription: SubscriptionType = strawberry_django.field()
+    subscription_list: List[SubscriptionType] = strawberry_django.field()
+
+    tag: TagType = strawberry_django.field()
+    tag_list: List[TagType] = strawberry_django.field()
+
+    webhook: WebhookType = strawberry_django.field()
+    webhook_list: List[WebhookType] = strawberry_django.field()
+
+    event_rule: EventRuleType = strawberry_django.field()
+    event_rule_list: List[EventRuleType] = strawberry_django.field()

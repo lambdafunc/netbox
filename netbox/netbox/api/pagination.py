@@ -16,7 +16,7 @@ class OptionalLimitOffsetPagination(LimitOffsetPagination):
     def paginate_queryset(self, queryset, request, view=None):
 
         if isinstance(queryset, QuerySet):
-            self.count = queryset.count()
+            self.count = self.get_queryset_count(queryset)
         else:
             # We're dealing with an iterable, not a QuerySet
             self.count = len(queryset)
@@ -38,12 +38,14 @@ class OptionalLimitOffsetPagination(LimitOffsetPagination):
 
     def get_limit(self, request):
         if self.limit_query_param:
+            MAX_PAGE_SIZE = get_config().MAX_PAGE_SIZE
+            if MAX_PAGE_SIZE:
+                MAX_PAGE_SIZE = max(MAX_PAGE_SIZE, self.default_limit)
             try:
                 limit = int(request.query_params[self.limit_query_param])
                 if limit < 0:
                     raise ValueError()
                 # Enforce maximum page size, if defined
-                MAX_PAGE_SIZE = get_config().MAX_PAGE_SIZE
                 if MAX_PAGE_SIZE:
                     return MAX_PAGE_SIZE if limit == 0 else min(limit, MAX_PAGE_SIZE)
                 return limit
@@ -51,6 +53,9 @@ class OptionalLimitOffsetPagination(LimitOffsetPagination):
                 pass
 
         return self.default_limit
+
+    def get_queryset_count(self, queryset):
+        return queryset.count()
 
     def get_next_link(self):
 
@@ -67,3 +72,16 @@ class OptionalLimitOffsetPagination(LimitOffsetPagination):
             return None
 
         return super().get_previous_link()
+
+
+class StripCountAnnotationsPaginator(OptionalLimitOffsetPagination):
+    """
+    Strips the annotations on the queryset before getting the count
+    to optimize pagination of complex queries.
+    """
+    def get_queryset_count(self, queryset):
+        # Clone the queryset to avoid messing up the actual query
+        cloned_queryset = queryset.all()
+        cloned_queryset.query.annotations.clear()
+
+        return cloned_queryset.count()

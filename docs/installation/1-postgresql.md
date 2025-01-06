@@ -2,8 +2,8 @@
 
 This section entails the installation and configuration of a local PostgreSQL database. If you already have a PostgreSQL database service in place, skip to [the next section](2-redis.md).
 
-!!! warning "PostgreSQL 10 or later required"
-    NetBox requires PostgreSQL 10 or later. Please note that MySQL and other relational databases are **not** supported.
+!!! warning "PostgreSQL 12 or later required"
+    NetBox requires PostgreSQL 12 or later. Please note that MySQL and other relational databases are **not** supported.
 
 ## Installation
 
@@ -28,14 +28,13 @@ This section entails the installation and configuration of a local PostgreSQL da
     host    all             all             ::1/128                 md5
     ```
 
-Once PostgreSQL has been installed, start the service and enable it to run at boot:
+    Once PostgreSQL has been installed, start the service and enable it to run at boot:
 
-```no-highlight
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-```
+    ```no-highlight
+    sudo systemctl enable --now postgresql
+    ```
 
-Before continuing, verify that you have installed PostgreSQL 10 or later:
+Before continuing, verify that you have installed PostgreSQL 12 or later:
 
 ```no-highlight
 psql -V
@@ -54,7 +53,10 @@ Within the shell, enter the following commands to create the database and user (
 ```postgresql
 CREATE DATABASE netbox;
 CREATE USER netbox WITH PASSWORD 'J5brHrAXFLQSif0K';
-GRANT ALL PRIVILEGES ON DATABASE netbox TO netbox;
+ALTER DATABASE netbox OWNER TO netbox;
+-- the next two commands are needed on PostgreSQL 15 and later
+\connect netbox;
+GRANT CREATE ON SCHEMA public TO netbox;
 ```
 
 !!! danger "Use a strong password"

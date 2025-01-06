@@ -1,3 +1,5 @@
+from django.utils.translation import gettext_lazy as _
+
 from utilities.choices import ChoiceSet
 
 
@@ -7,6 +9,28 @@ from utilities.choices import ChoiceSet
 
 class SiteStatusChoices(ChoiceSet):
     key = 'Site.status'
+
+    STATUS_PLANNED = 'planned'
+    STATUS_STAGING = 'staging'
+    STATUS_ACTIVE = 'active'
+    STATUS_DECOMMISSIONING = 'decommissioning'
+    STATUS_RETIRED = 'retired'
+
+    CHOICES = [
+        (STATUS_PLANNED, _('Planned'), 'cyan'),
+        (STATUS_STAGING, _('Staging'), 'blue'),
+        (STATUS_ACTIVE, _('Active'), 'green'),
+        (STATUS_DECOMMISSIONING, _('Decommissioning'), 'yellow'),
+        (STATUS_RETIRED, _('Retired'), 'red'),
+    ]
+
+
+#
+# Locations
+#
+
+class LocationStatusChoices(ChoiceSet):
+    key = 'Location.status'
 
     STATUS_PLANNED = 'planned'
     STATUS_STAGING = 'staging'
@@ -27,20 +51,24 @@ class SiteStatusChoices(ChoiceSet):
 # Racks
 #
 
-class RackTypeChoices(ChoiceSet):
+class RackFormFactorChoices(ChoiceSet):
 
     TYPE_2POST = '2-post-frame'
     TYPE_4POST = '4-post-frame'
     TYPE_CABINET = '4-post-cabinet'
     TYPE_WALLFRAME = 'wall-frame'
+    TYPE_WALLFRAME_VERTICAL = 'wall-frame-vertical'
     TYPE_WALLCABINET = 'wall-cabinet'
+    TYPE_WALLCABINET_VERTICAL = 'wall-cabinet-vertical'
 
     CHOICES = (
-        (TYPE_2POST, '2-post frame'),
-        (TYPE_4POST, '4-post frame'),
-        (TYPE_CABINET, '4-post cabinet'),
-        (TYPE_WALLFRAME, 'Wall-mounted frame'),
-        (TYPE_WALLCABINET, 'Wall-mounted cabinet'),
+        (TYPE_2POST, _('2-post frame')),
+        (TYPE_4POST, _('4-post frame')),
+        (TYPE_CABINET, _('4-post cabinet')),
+        (TYPE_WALLFRAME, _('Wall-mounted frame')),
+        (TYPE_WALLFRAME_VERTICAL, _('Wall-mounted frame (vertical)')),
+        (TYPE_WALLCABINET, _('Wall-mounted cabinet')),
+        (TYPE_WALLCABINET_VERTICAL, _('Wall-mounted cabinet (vertical)')),
     )
 
 
@@ -52,10 +80,10 @@ class RackWidthChoices(ChoiceSet):
     WIDTH_23IN = 23
 
     CHOICES = (
-        (WIDTH_10IN, '10 inches'),
-        (WIDTH_19IN, '19 inches'),
-        (WIDTH_21IN, '21 inches'),
-        (WIDTH_23IN, '23 inches'),
+        (WIDTH_10IN, _('{n} inches').format(n=10)),
+        (WIDTH_19IN, _('{n} inches').format(n=19)),
+        (WIDTH_21IN, _('{n} inches').format(n=21)),
+        (WIDTH_23IN, _('{n} inches').format(n=23)),
     )
 
 
@@ -69,11 +97,11 @@ class RackStatusChoices(ChoiceSet):
     STATUS_DEPRECATED = 'deprecated'
 
     CHOICES = [
-        (STATUS_RESERVED, 'Reserved', 'yellow'),
-        (STATUS_AVAILABLE, 'Available', 'green'),
-        (STATUS_PLANNED, 'Planned', 'cyan'),
-        (STATUS_ACTIVE, 'Active', 'blue'),
-        (STATUS_DEPRECATED, 'Deprecated', 'red'),
+        (STATUS_RESERVED, _('Reserved'), 'yellow'),
+        (STATUS_AVAILABLE, _('Available'), 'green'),
+        (STATUS_PLANNED, _('Planned'), 'cyan'),
+        (STATUS_ACTIVE, _('Active'), 'blue'),
+        (STATUS_DEPRECATED, _('Deprecated'), 'red'),
     ]
 
 
@@ -83,8 +111,8 @@ class RackDimensionUnitChoices(ChoiceSet):
     UNIT_INCH = 'in'
 
     CHOICES = (
-        (UNIT_MILLIMETER, 'Millimeters'),
-        (UNIT_INCH, 'Inches'),
+        (UNIT_MILLIMETER, _('Millimeters')),
+        (UNIT_INCH, _('Inches')),
     )
 
 
@@ -99,6 +127,17 @@ class RackElevationDetailRenderChoices(ChoiceSet):
     )
 
 
+class RackAirflowChoices(ChoiceSet):
+
+    FRONT_TO_REAR = 'front-to-rear'
+    REAR_TO_FRONT = 'rear-to-front'
+
+    CHOICES = (
+        (FRONT_TO_REAR, _('Front to rear')),
+        (REAR_TO_FRONT, _('Rear to front')),
+    )
+
+
 #
 # DeviceTypes
 #
@@ -109,8 +148,8 @@ class SubdeviceRoleChoices(ChoiceSet):
     ROLE_CHILD = 'child'
 
     CHOICES = (
-        (ROLE_PARENT, 'Parent'),
-        (ROLE_CHILD, 'Child'),
+        (ROLE_PARENT, _('Parent')),
+        (ROLE_CHILD, _('Child')),
     )
 
 
@@ -124,8 +163,8 @@ class DeviceFaceChoices(ChoiceSet):
     FACE_REAR = 'rear'
 
     CHOICES = (
-        (FACE_FRONT, 'Front'),
-        (FACE_REAR, 'Rear'),
+        (FACE_FRONT, _('Front')),
+        (FACE_REAR, _('Rear')),
     )
 
 
@@ -141,13 +180,13 @@ class DeviceStatusChoices(ChoiceSet):
     STATUS_DECOMMISSIONING = 'decommissioning'
 
     CHOICES = [
-        (STATUS_OFFLINE, 'Offline', 'gray'),
-        (STATUS_ACTIVE, 'Active', 'green'),
-        (STATUS_PLANNED, 'Planned', 'cyan'),
-        (STATUS_STAGED, 'Staged', 'blue'),
-        (STATUS_FAILED, 'Failed', 'red'),
-        (STATUS_INVENTORY, 'Inventory', 'purple'),
-        (STATUS_DECOMMISSIONING, 'Decommissioning', 'yellow'),
+        (STATUS_OFFLINE, _('Offline'), 'gray'),
+        (STATUS_ACTIVE, _('Active'), 'green'),
+        (STATUS_PLANNED, _('Planned'), 'cyan'),
+        (STATUS_STAGED, _('Staged'), 'blue'),
+        (STATUS_FAILED, _('Failed'), 'red'),
+        (STATUS_INVENTORY, _('Inventory'), 'purple'),
+        (STATUS_DECOMMISSIONING, _('Decommissioning'), 'yellow'),
     ]
 
 
@@ -158,17 +197,66 @@ class DeviceAirflowChoices(ChoiceSet):
     AIRFLOW_LEFT_TO_RIGHT = 'left-to-right'
     AIRFLOW_RIGHT_TO_LEFT = 'right-to-left'
     AIRFLOW_SIDE_TO_REAR = 'side-to-rear'
+    AIRFLOW_REAR_TO_SIDE = 'rear-to-side'
+    AIRFLOW_BOTTOM_TO_TOP = 'bottom-to-top'
+    AIRFLOW_TOP_TO_BOTTOM = 'top-to-bottom'
     AIRFLOW_PASSIVE = 'passive'
     AIRFLOW_MIXED = 'mixed'
 
     CHOICES = (
-        (AIRFLOW_FRONT_TO_REAR, 'Front to rear'),
-        (AIRFLOW_REAR_TO_FRONT, 'Rear to front'),
-        (AIRFLOW_LEFT_TO_RIGHT, 'Left to right'),
-        (AIRFLOW_RIGHT_TO_LEFT, 'Right to left'),
-        (AIRFLOW_SIDE_TO_REAR, 'Side to rear'),
-        (AIRFLOW_PASSIVE, 'Passive'),
-        (AIRFLOW_MIXED, 'Mixed'),
+        (AIRFLOW_FRONT_TO_REAR, _('Front to rear')),
+        (AIRFLOW_REAR_TO_FRONT, _('Rear to front')),
+        (AIRFLOW_LEFT_TO_RIGHT, _('Left to right')),
+        (AIRFLOW_RIGHT_TO_LEFT, _('Right to left')),
+        (AIRFLOW_SIDE_TO_REAR, _('Side to rear')),
+        (AIRFLOW_REAR_TO_SIDE, _('Rear to side')),
+        (AIRFLOW_BOTTOM_TO_TOP, _('Bottom to top')),
+        (AIRFLOW_TOP_TO_BOTTOM, _('Top to bottom')),
+        (AIRFLOW_PASSIVE, _('Passive')),
+        (AIRFLOW_MIXED, _('Mixed')),
+    )
+
+
+#
+# Modules
+#
+
+class ModuleStatusChoices(ChoiceSet):
+    key = 'Module.status'
+
+    STATUS_OFFLINE = 'offline'
+    STATUS_ACTIVE = 'active'
+    STATUS_PLANNED = 'planned'
+    STATUS_STAGED = 'staged'
+    STATUS_FAILED = 'failed'
+    STATUS_DECOMMISSIONING = 'decommissioning'
+
+    CHOICES = [
+        (STATUS_OFFLINE, _('Offline'), 'gray'),
+        (STATUS_ACTIVE, _('Active'), 'green'),
+        (STATUS_PLANNED, _('Planned'), 'cyan'),
+        (STATUS_STAGED, _('Staged'), 'blue'),
+        (STATUS_FAILED, _('Failed'), 'red'),
+        (STATUS_DECOMMISSIONING, _('Decommissioning'), 'yellow'),
+    ]
+
+
+class ModuleAirflowChoices(ChoiceSet):
+
+    FRONT_TO_REAR = 'front-to-rear'
+    REAR_TO_FRONT = 'rear-to-front'
+    LEFT_TO_RIGHT = 'left-to-right'
+    RIGHT_TO_LEFT = 'right-to-left'
+    SIDE_TO_REAR = 'side-to-rear'
+    PASSIVE = 'passive'
+
+    CHOICES = (
+        (FRONT_TO_REAR, _('Front to rear')),
+        (REAR_TO_FRONT, _('Rear to front')),
+        (LEFT_TO_RIGHT, _('Left to right')),
+        (RIGHT_TO_LEFT, _('Right to left')),
+        (SIDE_TO_REAR, _('Side to rear')),
+        (PASSIVE, _('Passive')),
     )
 
 
@@ -268,6 +356,10 @@ class PowerPortTypeChoices(ChoiceSet):
     TYPE_IEC_3PNE4H = 'iec-60309-3p-n-e-4h'
     TYPE_IEC_3PNE6H = 'iec-60309-3p-n-e-6h'
     TYPE_IEC_3PNE9H = 'iec-60309-3p-n-e-9h'
+    # IEC 60906-1
+    TYPE_IEC_60906_1 = 'iec-60906-1'
+    TYPE_NBR_14136_10A = 'nbr-14136-10a'
+    TYPE_NBR_14136_20A = 'nbr-14136-20a'
     # NEMA non-locking
     TYPE_NEMA_115P = 'nema-1-15p'
     TYPE_NEMA_515P = 'nema-5-15p'
@@ -310,6 +402,7 @@ class PowerPortTypeChoices(ChoiceSet):
     TYPE_NEMA_L1560P = 'nema-l15-60p'
     TYPE_NEMA_L2120P = 'nema-l21-20p'
     TYPE_NEMA_L2130P = 'nema-l21-30p'
+    TYPE_NEMA_L2220P = 'nema-l22-20p'
     TYPE_NEMA_L2230P = 'nema-l22-30p'
     # California style
     TYPE_CS6361C = 'cs6361c'
@@ -343,6 +436,10 @@ class PowerPortTypeChoices(ChoiceSet):
     TYPE_USB_MICRO_AB = 'usb-micro-ab'
     TYPE_USB_3_B = 'usb-3-b'
     TYPE_USB_3_MICROB = 'usb-3-micro-b'
+    # Molex
+    TYPE_MOLEX_MICRO_FIT_1X2 = 'molex-micro-fit-1x2'
+    TYPE_MOLEX_MICRO_FIT_2X2 = 'molex-micro-fit-2x2'
+    TYPE_MOLEX_MICRO_FIT_2X4 = 'molex-micro-fit-2x4'
     # Direct current (DC)
     TYPE_DC = 'dc-terminal'
     # Proprietary
@@ -379,7 +476,12 @@ class PowerPortTypeChoices(ChoiceSet):
             (TYPE_IEC_3PNE6H, '3P+N+E 6H'),
             (TYPE_IEC_3PNE9H, '3P+N+E 9H'),
         )),
-        ('NEMA (Non-locking)', (
+        ('IEC 60906-1', (
+            (TYPE_IEC_60906_1, 'IEC 60906-1'),
+            (TYPE_NBR_14136_10A, '2P+T 10A (NBR 14136)'),
+            (TYPE_NBR_14136_20A, '2P+T 20A (NBR 14136)'),
+        )),
+        (_('NEMA (Non-locking)'), (
             (TYPE_NEMA_115P, 'NEMA 1-15P'),
             (TYPE_NEMA_515P, 'NEMA 5-15P'),
             (TYPE_NEMA_520P, 'NEMA 5-20P'),
@@ -401,7 +503,7 @@ class PowerPortTypeChoices(ChoiceSet):
             (TYPE_NEMA_1550P, 'NEMA 15-50P'),
             (TYPE_NEMA_1560P, 'NEMA 15-60P'),
         )),
-        ('NEMA (Locking)', (
+        (_('NEMA (Locking)'), (
             (TYPE_NEMA_L115P, 'NEMA L1-15P'),
             (TYPE_NEMA_L515P, 'NEMA L5-15P'),
             (TYPE_NEMA_L520P, 'NEMA L5-20P'),
@@ -422,9 +524,10 @@ class PowerPortTypeChoices(ChoiceSet):
             (TYPE_NEMA_L1560P, 'NEMA L15-60P'),
             (TYPE_NEMA_L2120P, 'NEMA L21-20P'),
             (TYPE_NEMA_L2130P, 'NEMA L21-30P'),
+            (TYPE_NEMA_L2220P, 'NEMA L22-20P'),
             (TYPE_NEMA_L2230P, 'NEMA L22-30P'),
         )),
-        ('California Style', (
+        (_('California Style'), (
             (TYPE_CS6361C, 'CS6361C'),
             (TYPE_CS6365C, 'CS6365C'),
             (TYPE_CS8165C, 'CS8165C'),
@@ -432,7 +535,7 @@ class PowerPortTypeChoices(ChoiceSet):
             (TYPE_CS8365C, 'CS8365C'),
             (TYPE_CS8465C, 'CS8465C'),
         )),
-        ('International/ITA', (
+        (_('International/ITA'), (
             (TYPE_ITA_C, 'ITA Type C (CEE 7/16)'),
             (TYPE_ITA_E, 'ITA Type E (CEE 7/6)'),
             (TYPE_ITA_F, 'ITA Type F (CEE 7/4)'),
@@ -459,10 +562,15 @@ class PowerPortTypeChoices(ChoiceSet):
             (TYPE_USB_3_B, 'USB 3.0 Type B'),
             (TYPE_USB_3_MICROB, 'USB 3.0 Micro B'),
         )),
+        ('Molex', (
+            (TYPE_MOLEX_MICRO_FIT_1X2, 'Molex Micro-Fit 1x2'),
+            (TYPE_MOLEX_MICRO_FIT_2X2, 'Molex Micro-Fit 2x2'),
+            (TYPE_MOLEX_MICRO_FIT_2X4, 'Molex Micro-Fit 2x4'),
+        )),
         ('DC', (
             (TYPE_DC, 'DC Terminal'),
         )),
-        ('Proprietary', (
+        (_('Proprietary'), (
             (TYPE_SAF_D_GRID, 'Saf-D-Grid'),
             (TYPE_NEUTRIK_POWERCON_20A, 'Neutrik powerCON (20A)'),
             (TYPE_NEUTRIK_POWERCON_32A, 'Neutrik powerCON (32A)'),
@@ -470,7 +578,7 @@ class PowerPortTypeChoices(ChoiceSet):
             (TYPE_NEUTRIK_POWERCON_TRUE1_TOP, 'Neutrik powerCON TRUE1 TOP'),
             (TYPE_UBIQUITI_SMARTPOWER, 'Ubiquiti SmartPower'),
         )),
-        ('Other', (
+        (_('Other'), (
             (TYPE_HARDWIRED, 'Hardwired'),
             (TYPE_OTHER, 'Other'),
         )),
@@ -503,6 +611,10 @@ class PowerOutletTypeChoices(ChoiceSet):
     TYPE_IEC_3PNE4H = 'iec-60309-3p-n-e-4h'
     TYPE_IEC_3PNE6H = 'iec-60309-3p-n-e-6h'
     TYPE_IEC_3PNE9H = 'iec-60309-3p-n-e-9h'
+    # IEC 60906-1
+    TYPE_IEC_60906_1 = 'iec-60906-1'
+    TYPE_NBR_14136_10A = 'nbr-14136-10a'
+    TYPE_NBR_14136_20A = 'nbr-14136-20a'
     # NEMA non-locking
     TYPE_NEMA_115R = 'nema-1-15r'
     TYPE_NEMA_515R = 'nema-5-15r'
@@ -545,6 +657,7 @@ class PowerOutletTypeChoices(ChoiceSet):
     TYPE_NEMA_L1560R = 'nema-l15-60r'
     TYPE_NEMA_L2120R = 'nema-l21-20r'
     TYPE_NEMA_L2130R = 'nema-l21-30r'
+    TYPE_NEMA_L2220R = 'nema-l22-20r'
     TYPE_NEMA_L2230R = 'nema-l22-30r'
     # California style
     TYPE_CS6360C = 'CS6360C'
@@ -570,9 +683,14 @@ class PowerOutletTypeChoices(ChoiceSet):
     TYPE_USB_A = 'usb-a'
     TYPE_USB_MICROB = 'usb-micro-b'
     TYPE_USB_C = 'usb-c'
+    # Molex
+    TYPE_MOLEX_MICRO_FIT_1X2 = 'molex-micro-fit-1x2'
+    TYPE_MOLEX_MICRO_FIT_2X2 = 'molex-micro-fit-2x2'
+    TYPE_MOLEX_MICRO_FIT_2X4 = 'molex-micro-fit-2x4'
     # Direct current (DC)
     TYPE_DC = 'dc-terminal'
     # Proprietary
+    TYPE_EATON_C39 = 'eaton-c39'
     TYPE_HDOT_CX = 'hdot-cx'
     TYPE_SAF_D_GRID = 'saf-d-grid'
     TYPE_NEUTRIK_POWERCON_20A = 'neutrik-powercon-20a'
@@ -607,7 +725,12 @@ class PowerOutletTypeChoices(ChoiceSet):
             (TYPE_IEC_3PNE6H, '3P+N+E 6H'),
             (TYPE_IEC_3PNE9H, '3P+N+E 9H'),
         )),
-        ('NEMA (Non-locking)', (
+        ('IEC 60906-1', (
+            (TYPE_IEC_60906_1, 'IEC 60906-1'),
+            (TYPE_NBR_14136_10A, '2P+T 10A (NBR 14136)'),
+            (TYPE_NBR_14136_20A, '2P+T 20A (NBR 14136)'),
+        )),
+        (_('NEMA (Non-locking)'), (
             (TYPE_NEMA_115R, 'NEMA 1-15R'),
             (TYPE_NEMA_515R, 'NEMA 5-15R'),
             (TYPE_NEMA_520R, 'NEMA 5-20R'),
@@ -629,7 +752,7 @@ class PowerOutletTypeChoices(ChoiceSet):
             (TYPE_NEMA_1550R, 'NEMA 15-50R'),
             (TYPE_NEMA_1560R, 'NEMA 15-60R'),
         )),
-        ('NEMA (Locking)', (
+        (_('NEMA (Locking)'), (
             (TYPE_NEMA_L115R, 'NEMA L1-15R'),
             (TYPE_NEMA_L515R, 'NEMA L5-15R'),
             (TYPE_NEMA_L520R, 'NEMA L5-20R'),
@@ -650,9 +773,10 @@ class PowerOutletTypeChoices(ChoiceSet):
             (TYPE_NEMA_L1560R, 'NEMA L15-60R'),
             (TYPE_NEMA_L2120R, 'NEMA L21-20R'),
             (TYPE_NEMA_L2130R, 'NEMA L21-30R'),
+            (TYPE_NEMA_L2220R, 'NEMA L22-20R'),
             (TYPE_NEMA_L2230R, 'NEMA L22-30R'),
         )),
-        ('California Style', (
+        (_('California Style'), (
             (TYPE_CS6360C, 'CS6360C'),
             (TYPE_CS6364C, 'CS6364C'),
             (TYPE_CS8164C, 'CS8164C'),
@@ -660,7 +784,7 @@ class PowerOutletTypeChoices(ChoiceSet):
             (TYPE_CS8364C, 'CS8364C'),
             (TYPE_CS8464C, 'CS8464C'),
         )),
-        ('ITA/International', (
+        (_('ITA/International'), (
             (TYPE_ITA_E, 'ITA Type E (CEE 7/5)'),
             (TYPE_ITA_F, 'ITA Type F (CEE 7/3)'),
             (TYPE_ITA_G, 'ITA Type G (BS 1363)'),
@@ -679,10 +803,16 @@ class PowerOutletTypeChoices(ChoiceSet):
             (TYPE_USB_MICROB, 'USB Micro B'),
             (TYPE_USB_C, 'USB Type C'),
         )),
+        ('Molex', (
+            (TYPE_MOLEX_MICRO_FIT_1X2, 'Molex Micro-Fit 1x2'),
+            (TYPE_MOLEX_MICRO_FIT_2X2, 'Molex Micro-Fit 2x2'),
+            (TYPE_MOLEX_MICRO_FIT_2X4, 'Molex Micro-Fit 2x4'),
+        )),
         ('DC', (
             (TYPE_DC, 'DC Terminal'),
         )),
-        ('Proprietary', (
+        (_('Proprietary'), (
+            (TYPE_EATON_C39, 'Eaton C39'),
             (TYPE_HDOT_CX, 'HDOT Cx'),
             (TYPE_SAF_D_GRID, 'Saf-D-Grid'),
             (TYPE_NEUTRIK_POWERCON_20A, 'Neutrik powerCON (20A)'),
@@ -691,7 +821,7 @@ class PowerOutletTypeChoices(ChoiceSet):
             (TYPE_NEUTRIK_POWERCON_TRUE1_TOP, 'Neutrik powerCON TRUE1 TOP'),
             (TYPE_UBIQUITI_SMARTPOWER, 'Ubiquiti SmartPower'),
         )),
-        ('Other', (
+        (_('Other'), (
             (TYPE_HARDWIRED, 'Hardwired'),
             (TYPE_OTHER, 'Other'),
         )),
@@ -721,9 +851,9 @@ class InterfaceKindChoices(ChoiceSet):
     KIND_WIRELESS = 'wireless'
 
     CHOICES = (
-        (KIND_PHYSICAL, 'Physical'),
-        (KIND_VIRTUAL, 'Virtual'),
-        (KIND_WIRELESS, 'Wireless'),
+        (KIND_PHYSICAL, _('Physical')),
+        (KIND_VIRTUAL, _('Virtual')),
+        (KIND_WIRELESS, _('Wireless')),
     )
 
 
@@ -735,8 +865,14 @@ class InterfaceTypeChoices(ChoiceSet):
     TYPE_LAG = 'lag'
 
     # Ethernet
+    TYPE_100ME_FX = '100base-fx'
+    TYPE_100ME_LFX = '100base-lfx'
     TYPE_100ME_FIXED = '100base-tx'
+    TYPE_100ME_T1 = '100base-t1'
+    TYPE_100ME_SFP = '100base-x-sfp'
     TYPE_1GE_FIXED = '1000base-t'
+    TYPE_1GE_LX_FIXED = '1000base-lx'
+    TYPE_1GE_TX_FIXED = '1000base-tx'
     TYPE_1GE_GBIC = '1000base-x-gbic'
     TYPE_1GE_SFP = '1000base-x-sfp'
     TYPE_2GE_FIXED = '2.5gbase-t'
@@ -754,12 +890,37 @@ class InterfaceTypeChoices(ChoiceSet):
     TYPE_100GE_CFP = '100gbase-x-cfp'
     TYPE_100GE_CFP2 = '100gbase-x-cfp2'
     TYPE_100GE_CFP4 = '100gbase-x-cfp4'
+    TYPE_100GE_CXP = '100gbase-x-cxp'
     TYPE_100GE_CPAK = '100gbase-x-cpak'
+    TYPE_100GE_DSFP = '100gbase-x-dsfp'
+    TYPE_100GE_SFP_DD = '100gbase-x-sfpdd'
     TYPE_100GE_QSFP28 = '100gbase-x-qsfp28'
+    TYPE_100GE_QSFP_DD = '100gbase-x-qsfpdd'
     TYPE_200GE_CFP2 = '200gbase-x-cfp2'
     TYPE_200GE_QSFP56 = '200gbase-x-qsfp56'
+    TYPE_200GE_QSFP_DD = '200gbase-x-qsfpdd'
+    TYPE_400GE_CFP2 = '400gbase-x-cfp2'
+    TYPE_400GE_QSFP112 = '400gbase-x-qsfp112'
     TYPE_400GE_QSFP_DD = '400gbase-x-qsfpdd'
     TYPE_400GE_OSFP = '400gbase-x-osfp'
+    TYPE_400GE_OSFP_RHS = '400gbase-x-osfp-rhs'
+    TYPE_400GE_CDFP = '400gbase-x-cdfp'
+    TYPE_400GE_CFP8 = '400gbase-x-cfp8'
+    TYPE_800GE_QSFP_DD = '800gbase-x-qsfpdd'
+    TYPE_800GE_OSFP = '800gbase-x-osfp'
+
+    # Ethernet Backplane
+    TYPE_1GE_KX = '1000base-kx'
+    TYPE_2GE_KX = '2.5gbase-kx'
+    TYPE_5GE_KR = '5gbase-kr'
+    TYPE_10GE_KR = '10gbase-kr'
+    TYPE_10GE_KX4 = '10gbase-kx4'
+    TYPE_25GE_KR = '25gbase-kr'
+    TYPE_40GE_KR4 = '40gbase-kr4'
+    TYPE_50GE_KR = '50gbase-kr'
+    TYPE_100GE_KP4 = '100gbase-kp4'
+    TYPE_100GE_KR2 = '100gbase-kr2'
+    TYPE_100GE_KR4 = '100gbase-kr4'
 
     # Wireless
     TYPE_80211A = 'ieee802.11a'
@@ -768,12 +929,18 @@ class InterfaceTypeChoices(ChoiceSet):
     TYPE_80211AC = 'ieee802.11ac'
     TYPE_80211AD = 'ieee802.11ad'
     TYPE_80211AX = 'ieee802.11ax'
+    TYPE_80211AY = 'ieee802.11ay'
+    TYPE_80211BE = 'ieee802.11be'
     TYPE_802151 = 'ieee802.15.1'
+    TYPE_802154 = 'ieee802.15.4'
+    TYPE_OTHER_WIRELESS = 'other-wireless'
 
     # Cellular
     TYPE_GSM = 'gsm'
     TYPE_CDMA = 'cdma'
     TYPE_LTE = 'lte'
+    TYPE_4G = '4g'
+    TYPE_5G = '5g'
 
     # SONET
     TYPE_SONET_OC3 = 'sonet-oc3'
@@ -791,7 +958,10 @@ class InterfaceTypeChoices(ChoiceSet):
     TYPE_8GFC_SFP_PLUS = '8gfc-sfpp'
     TYPE_16GFC_SFP_PLUS = '16gfc-sfpp'
     TYPE_32GFC_SFP28 = '32gfc-sfp28'
+    TYPE_32GFC_SFP_PLUS = '32gfc-sfpp'
     TYPE_64GFC_QSFP_PLUS = '64gfc-qsfpp'
+    TYPE_64GFC_SFP_DD = '64gfc-sfpdd'
+    TYPE_64GFC_SFP_PLUS = '64gfc-sfpp'
     TYPE_128GFC_QSFP28 = '128gfc-qsfp28'
 
     # InfiniBand
@@ -814,6 +984,20 @@ class InterfaceTypeChoices(ChoiceSet):
     # ATM/DSL
     TYPE_XDSL = 'xdsl'
 
+    # Coaxial
+    TYPE_DOCSIS = 'docsis'
+
+    # PON
+    TYPE_BPON = 'bpon'
+    TYPE_EPON = 'epon'
+    TYPE_10G_EPON = '10g-epon'
+    TYPE_GPON = 'gpon'
+    TYPE_XG_PON = 'xg-pon'
+    TYPE_XGS_PON = 'xgs-pon'
+    TYPE_NG_PON2 = 'ng-pon2'
+    TYPE_25G_PON = '25g-pon'
+    TYPE_50G_PON = '50g-pon'
+
     # Stacking
     TYPE_STACKWISE = 'cisco-stackwise'
     TYPE_STACKWISE_PLUS = 'cisco-stackwise-plus'
@@ -823,6 +1007,7 @@ class InterfaceTypeChoices(ChoiceSet):
     TYPE_STACKWISE160 = 'cisco-stackwise-160'
     TYPE_STACKWISE320 = 'cisco-stackwise-320'
     TYPE_STACKWISE480 = 'cisco-stackwise-480'
+    TYPE_STACKWISE1T = 'cisco-stackwise-1t'
     TYPE_JUNIPER_VCP = 'juniper-vcp'
     TYPE_SUMMITSTACK = 'extreme-summitstack'
     TYPE_SUMMITSTACK128 = 'extreme-summitstack-128'
@@ -834,18 +1019,23 @@ class InterfaceTypeChoices(ChoiceSet):
 
     CHOICES = (
         (
-            'Virtual interfaces',
+            _('Virtual interfaces'),
             (
-                (TYPE_VIRTUAL, 'Virtual'),
-                (TYPE_BRIDGE, 'Bridge'),
-                (TYPE_LAG, 'Link Aggregation Group (LAG)'),
+                (TYPE_VIRTUAL, _('Virtual')),
+                (TYPE_BRIDGE, _('Bridge')),
+                (TYPE_LAG, _('Link Aggregation Group (LAG)')),
             ),
         ),
         (
-            'Ethernet (fixed)',
+            _('Ethernet (fixed)'),
             (
+                (TYPE_100ME_FX, '100BASE-FX (10/100ME FIBER)'),
+                (TYPE_100ME_LFX, '100BASE-LFX (10/100ME FIBER)'),
                 (TYPE_100ME_FIXED, '100BASE-TX (10/100ME)'),
+                (TYPE_100ME_T1, '100BASE-T1 (10/100ME Single Pair)'),
                 (TYPE_1GE_FIXED, '1000BASE-T (1GE)'),
+                (TYPE_1GE_LX_FIXED, '1000BASE-LX (1GE)'),
+                (TYPE_1GE_TX_FIXED, '1000BASE-TX (1GE)'),
                 (TYPE_2GE_FIXED, '2.5GBASE-T (2.5GE)'),
                 (TYPE_5GE_FIXED, '5GBASE-T (5GE)'),
                 (TYPE_10GE_FIXED, '10GBASE-T (10GE)'),
@@ -853,8 +1043,9 @@ class InterfaceTypeChoices(ChoiceSet):
             )
         ),
         (
-            'Ethernet (modular)',
+            _('Ethernet (modular)'),
             (
+                (TYPE_100ME_SFP, 'SFP (100ME)'),
                 (TYPE_1GE_GBIC, 'GBIC (1GE)'),
                 (TYPE_1GE_SFP, 'SFP (1GE)'),
                 (TYPE_10GE_SFP_PLUS, 'SFP+ (10GE)'),
@@ -868,16 +1059,44 @@ class InterfaceTypeChoices(ChoiceSet):
                 (TYPE_100GE_CFP, 'CFP (100GE)'),
                 (TYPE_100GE_CFP2, 'CFP2 (100GE)'),
                 (TYPE_200GE_CFP2, 'CFP2 (200GE)'),
+                (TYPE_400GE_CFP2, 'CFP2 (400GE)'),
                 (TYPE_100GE_CFP4, 'CFP4 (100GE)'),
+                (TYPE_100GE_CXP, 'CXP (100GE)'),
                 (TYPE_100GE_CPAK, 'Cisco CPAK (100GE)'),
+                (TYPE_100GE_DSFP, 'DSFP (100GE)'),
+                (TYPE_100GE_SFP_DD, 'SFP-DD (100GE)'),
                 (TYPE_100GE_QSFP28, 'QSFP28 (100GE)'),
+                (TYPE_100GE_QSFP_DD, 'QSFP-DD (100GE)'),
                 (TYPE_200GE_QSFP56, 'QSFP56 (200GE)'),
+                (TYPE_200GE_QSFP_DD, 'QSFP-DD (200GE)'),
+                (TYPE_400GE_QSFP112, 'QSFP112 (400GE)'),
                 (TYPE_400GE_QSFP_DD, 'QSFP-DD (400GE)'),
                 (TYPE_400GE_OSFP, 'OSFP (400GE)'),
+                (TYPE_400GE_OSFP_RHS, 'OSFP-RHS (400GE)'),
+                (TYPE_400GE_CDFP, 'CDFP (400GE)'),
+                (TYPE_400GE_CFP8, 'CPF8 (400GE)'),
+                (TYPE_800GE_QSFP_DD, 'QSFP-DD (800GE)'),
+                (TYPE_800GE_OSFP, 'OSFP (800GE)'),
             )
         ),
         (
-            'Wireless',
+            _('Ethernet (backplane)'),
+            (
+                (TYPE_1GE_KX, '1000BASE-KX (1GE)'),
+                (TYPE_2GE_KX, '2.5GBASE-KX (2.5GE)'),
+                (TYPE_5GE_KR, '5GBASE-KR (5GE)'),
+                (TYPE_10GE_KR, '10GBASE-KR (10GE)'),
+                (TYPE_10GE_KX4, '10GBASE-KX4 (10GE)'),
+                (TYPE_25GE_KR, '25GBASE-KR (25GE)'),
+                (TYPE_40GE_KR4, '40GBASE-KR4 (40GE)'),
+                (TYPE_50GE_KR, '50GBASE-KR (50GE)'),
+                (TYPE_100GE_KP4, '100GBASE-KP4 (100GE)'),
+                (TYPE_100GE_KR2, '100GBASE-KR2 (100GE)'),
+                (TYPE_100GE_KR4, '100GBASE-KR4 (100GE)'),
+            )
+        ),
+        (
+            _('Wireless'),
             (
                 (TYPE_80211A, 'IEEE 802.11a'),
                 (TYPE_80211G, 'IEEE 802.11b/g'),
@@ -885,15 +1104,21 @@ class InterfaceTypeChoices(ChoiceSet):
                 (TYPE_80211AC, 'IEEE 802.11ac'),
                 (TYPE_80211AD, 'IEEE 802.11ad'),
                 (TYPE_80211AX, 'IEEE 802.11ax'),
+                (TYPE_80211AY, 'IEEE 802.11ay'),
+                (TYPE_80211BE, 'IEEE 802.11be'),
                 (TYPE_802151, 'IEEE 802.15.1 (Bluetooth)'),
+                (TYPE_802154, 'IEEE 802.15.4 (LR-WPAN)'),
+                (TYPE_OTHER_WIRELESS, 'Other (Wireless)'),
             )
         ),
         (
-            'Cellular',
+            _('Cellular'),
             (
                 (TYPE_GSM, 'GSM'),
                 (TYPE_CDMA, 'CDMA'),
                 (TYPE_LTE, 'LTE'),
+                (TYPE_4G, '4G'),
+                (TYPE_5G, '5G'),
             )
         ),
         (
@@ -917,7 +1142,10 @@ class InterfaceTypeChoices(ChoiceSet):
                 (TYPE_8GFC_SFP_PLUS, 'SFP+ (8GFC)'),
                 (TYPE_16GFC_SFP_PLUS, 'SFP+ (16GFC)'),
                 (TYPE_32GFC_SFP28, 'SFP28 (32GFC)'),
+                (TYPE_32GFC_SFP_PLUS, 'SFP+ (32GFC)'),
                 (TYPE_64GFC_QSFP_PLUS, 'QSFP+ (64GFC)'),
+                (TYPE_64GFC_SFP_DD, 'SFP-DD (64GFC)'),
+                (TYPE_64GFC_SFP_PLUS, 'SFP+ (64GFC)'),
                 (TYPE_128GFC_QSFP28, 'QSFP28 (128GFC)'),
             )
         ),
@@ -936,7 +1164,7 @@ class InterfaceTypeChoices(ChoiceSet):
             )
         ),
         (
-            'Serial',
+            _('Serial'),
             (
                 (TYPE_T1, 'T1 (1.544 Mbps)'),
                 (TYPE_E1, 'E1 (2.048 Mbps)'),
@@ -951,7 +1179,27 @@ class InterfaceTypeChoices(ChoiceSet):
             )
         ),
         (
-            'Stacking',
+            _('Coaxial'),
+            (
+                (TYPE_DOCSIS, 'DOCSIS'),
+            )
+        ),
+        (
+            'PON',
+            (
+                (TYPE_BPON, 'BPON (622 Mbps / 155 Mbps)'),
+                (TYPE_EPON, 'EPON (1 Gbps)'),
+                (TYPE_10G_EPON, '10G-EPON (10 Gbps)'),
+                (TYPE_GPON, 'GPON (2.5 Gbps / 1.25 Gbps)'),
+                (TYPE_XG_PON, 'XG-PON (10 Gbps / 2.5 Gbps)'),
+                (TYPE_XGS_PON, 'XGS-PON (10 Gbps)'),
+                (TYPE_NG_PON2, 'NG-PON2 (TWDM-PON) (4x10 Gbps)'),
+                (TYPE_25G_PON, '25G-PON (25 Gbps)'),
+                (TYPE_50G_PON, '50G-PON (50 Gbps)'),
+            )
+        ),
+        (
+            _('Stacking'),
             (
                 (TYPE_STACKWISE, 'Cisco StackWise'),
                 (TYPE_STACKWISE_PLUS, 'Cisco StackWise Plus'),
@@ -961,6 +1209,7 @@ class InterfaceTypeChoices(ChoiceSet):
                 (TYPE_STACKWISE160, 'Cisco StackWise-160'),
                 (TYPE_STACKWISE320, 'Cisco StackWise-320'),
                 (TYPE_STACKWISE480, 'Cisco StackWise-480'),
+                (TYPE_STACKWISE1T, 'Cisco StackWise-1T'),
                 (TYPE_JUNIPER_VCP, 'Juniper VCP'),
                 (TYPE_SUMMITSTACK, 'Extreme SummitStack'),
                 (TYPE_SUMMITSTACK128, 'Extreme SummitStack-128'),
@@ -969,12 +1218,28 @@ class InterfaceTypeChoices(ChoiceSet):
             )
         ),
         (
-            'Other',
+            _('Other'),
             (
-                (TYPE_OTHER, 'Other'),
+                (TYPE_OTHER, _('Other')),
             )
         ),
     )
+
+
+class InterfaceSpeedChoices(ChoiceSet):
+    key = 'Interface.speed'
+
+    CHOICES = [
+        (10000, '10 Mbps'),
+        (100000, '100 Mbps'),
+        (1000000, '1 Gbps'),
+        (10000000, '10 Gbps'),
+        (25000000, '25 Gbps'),
+        (40000000, '40 Gbps'),
+        (100000000, '100 Gbps'),
+        (200000000, '200 Gbps'),
+        (400000000, '400 Gbps'),
+    ]
 
 
 class InterfaceDuplexChoices(ChoiceSet):
@@ -984,9 +1249,9 @@ class InterfaceDuplexChoices(ChoiceSet):
     DUPLEX_AUTO = 'auto'
 
     CHOICES = (
-        (DUPLEX_HALF, 'Half'),
-        (DUPLEX_FULL, 'Full'),
-        (DUPLEX_AUTO, 'Auto'),
+        (DUPLEX_HALF, _('Half')),
+        (DUPLEX_FULL, _('Full')),
+        (DUPLEX_AUTO, _('Auto')),
     )
 
 
@@ -997,9 +1262,54 @@ class InterfaceModeChoices(ChoiceSet):
     MODE_TAGGED_ALL = 'tagged-all'
 
     CHOICES = (
-        (MODE_ACCESS, 'Access'),
-        (MODE_TAGGED, 'Tagged'),
-        (MODE_TAGGED_ALL, 'Tagged (All)'),
+        (MODE_ACCESS, _('Access')),
+        (MODE_TAGGED, _('Tagged')),
+        (MODE_TAGGED_ALL, _('Tagged (All)')),
+    )
+
+
+class InterfacePoEModeChoices(ChoiceSet):
+
+    MODE_PD = 'pd'
+    MODE_PSE = 'pse'
+
+    CHOICES = (
+        (MODE_PD, 'PD'),
+        (MODE_PSE, 'PSE'),
+    )
+
+
+class InterfacePoETypeChoices(ChoiceSet):
+
+    TYPE_1_8023AF = 'type1-ieee802.3af'
+    TYPE_2_8023AT = 'type2-ieee802.3at'
+    TYPE_3_8023BT = 'type3-ieee802.3bt'
+    TYPE_4_8023BT = 'type4-ieee802.3bt'
+
+    PASSIVE_24V_2PAIR = 'passive-24v-2pair'
+    PASSIVE_24V_4PAIR = 'passive-24v-4pair'
+    PASSIVE_48V_2PAIR = 'passive-48v-2pair'
+    PASSIVE_48V_4PAIR = 'passive-48v-4pair'
+
+    CHOICES = (
+        (
+            _('IEEE Standard'),
+            (
+                (TYPE_1_8023AF, '802.3af (Type 1)'),
+                (TYPE_2_8023AT, '802.3at (Type 2)'),
+                (TYPE_3_8023BT, '802.3bt (Type 3)'),
+                (TYPE_4_8023BT, '802.3bt (Type 4)'),
+            )
+        ),
+        (
+            _('Passive'),
+            (
+                (PASSIVE_24V_2PAIR, _('Passive 24V (2-pair)')),
+                (PASSIVE_24V_4PAIR, _('Passive 24V (4-pair)')),
+                (PASSIVE_48V_2PAIR, _('Passive 48V (2-pair)')),
+                (PASSIVE_48V_4PAIR, _('Passive 48V (4-pair)')),
+            )
+        ),
     )
 
 
@@ -1043,6 +1353,10 @@ class PortTypeChoices(ChoiceSet):
     TYPE_LSH_PC = 'lsh-pc'
     TYPE_LSH_UPC = 'lsh-upc'
     TYPE_LSH_APC = 'lsh-apc'
+    TYPE_LX5 = 'lx5'
+    TYPE_LX5_PC = 'lx5-pc'
+    TYPE_LX5_UPC = 'lx5-upc'
+    TYPE_LX5_APC = 'lx5-apc'
     TYPE_SPLICE = 'splice'
     TYPE_CS = 'cs'
     TYPE_SN = 'sn'
@@ -1051,11 +1365,19 @@ class PortTypeChoices(ChoiceSet):
     TYPE_URM_P2 = 'urm-p2'
     TYPE_URM_P4 = 'urm-p4'
     TYPE_URM_P8 = 'urm-p8'
+    TYPE_USB_A = 'usb-a'
+    TYPE_USB_B = 'usb-b'
+    TYPE_USB_C = 'usb-c'
+    TYPE_USB_MINI_A = 'usb-mini-a'
+    TYPE_USB_MINI_B = 'usb-mini-b'
+    TYPE_USB_MICRO_A = 'usb-micro-a'
+    TYPE_USB_MICRO_B = 'usb-micro-b'
+    TYPE_USB_MICRO_AB = 'usb-micro-ab'
     TYPE_OTHER = 'other'
 
     CHOICES = (
         (
-            'Copper',
+            _('Copper'),
             (
                 (TYPE_8P8C, '8P8C'),
                 (TYPE_8P6C, '8P6C'),
@@ -1078,7 +1400,7 @@ class PortTypeChoices(ChoiceSet):
             ),
         ),
         (
-            'Fiber Optic',
+            _('Fiber Optic'),
             (
                 (TYPE_FC, 'FC'),
                 (TYPE_LC, 'LC'),
@@ -1089,6 +1411,10 @@ class PortTypeChoices(ChoiceSet):
                 (TYPE_LSH_PC, 'LSH/PC'),
                 (TYPE_LSH_UPC, 'LSH/UPC'),
                 (TYPE_LSH_APC, 'LSH/APC'),
+                (TYPE_LX5, 'LX.5'),
+                (TYPE_LX5_PC, 'LX.5/PC'),
+                (TYPE_LX5_UPC, 'LX.5/UPC'),
+                (TYPE_LX5_APC, 'LX.5/APC'),
                 (TYPE_MPO, 'MPO'),
                 (TYPE_MTRJ, 'MTRJ'),
                 (TYPE_SC, 'SC'),
@@ -1107,9 +1433,22 @@ class PortTypeChoices(ChoiceSet):
             ),
         ),
         (
-            'Other',
+            _('USB'),
             (
-                (TYPE_OTHER, 'Other'),
+                (TYPE_USB_A, 'USB Type A'),
+                (TYPE_USB_B, 'USB Type B'),
+                (TYPE_USB_C, 'USB Type C'),
+                (TYPE_USB_MINI_A, 'USB Mini A'),
+                (TYPE_USB_MINI_B, 'USB Mini B'),
+                (TYPE_USB_MICRO_A, 'USB Micro A'),
+                (TYPE_USB_MICRO_B, 'USB Micro B'),
+                (TYPE_USB_MICRO_AB, 'USB Micro AB'),
+            ),
+        ),
+        (
+            _('Other'),
+            (
+                (TYPE_OTHER, _('Other')),
             )
         )
     )
@@ -1144,10 +1483,11 @@ class CableTypeChoices(ChoiceSet):
     TYPE_SMF_OS2 = 'smf-os2'
     TYPE_AOC = 'aoc'
     TYPE_POWER = 'power'
+    TYPE_USB = 'usb'
 
     CHOICES = (
         (
-            'Copper', (
+            _('Copper'), (
                 (TYPE_CAT3, 'CAT3'),
                 (TYPE_CAT5, 'CAT5'),
                 (TYPE_CAT5E, 'CAT5e'),
@@ -1163,7 +1503,7 @@ class CableTypeChoices(ChoiceSet):
             ),
         ),
         (
-            'Fiber', (
+            _('Fiber'), (
                 (TYPE_MMF, 'Multimode Fiber'),
                 (TYPE_MMF_OM1, 'Multimode Fiber (OM1)'),
                 (TYPE_MMF_OM2, 'Multimode Fiber (OM2)'),
@@ -1176,7 +1516,8 @@ class CableTypeChoices(ChoiceSet):
                 (TYPE_AOC, 'Active Optical Cabling (AOC)'),
             ),
         ),
-        (TYPE_POWER, 'Power'),
+        (TYPE_USB, _('USB')),
+        (TYPE_POWER, _('Power')),
     )
 
 
@@ -1187,9 +1528,9 @@ class LinkStatusChoices(ChoiceSet):
     STATUS_DECOMMISSIONING = 'decommissioning'
 
     CHOICES = (
-        (STATUS_CONNECTED, 'Connected', 'green'),
-        (STATUS_PLANNED, 'Planned', 'blue'),
-        (STATUS_DECOMMISSIONING, 'Decommissioning', 'yellow'),
+        (STATUS_CONNECTED, _('Connected'), 'green'),
+        (STATUS_PLANNED, _('Planned'), 'blue'),
+        (STATUS_DECOMMISSIONING, _('Decommissioning'), 'yellow'),
     )
 
 
@@ -1206,12 +1547,46 @@ class CableLengthUnitChoices(ChoiceSet):
     UNIT_INCH = 'in'
 
     CHOICES = (
-        (UNIT_KILOMETER, 'Kilometers'),
-        (UNIT_METER, 'Meters'),
-        (UNIT_CENTIMETER, 'Centimeters'),
-        (UNIT_MILE, 'Miles'),
-        (UNIT_FOOT, 'Feet'),
-        (UNIT_INCH, 'Inches'),
+        (UNIT_KILOMETER, _('Kilometers')),
+        (UNIT_METER, _('Meters')),
+        (UNIT_CENTIMETER, _('Centimeters')),
+        (UNIT_MILE, _('Miles')),
+        (UNIT_FOOT, _('Feet')),
+        (UNIT_INCH, _('Inches')),
+    )
+
+
+class WeightUnitChoices(ChoiceSet):
+
+    # Metric
+    UNIT_KILOGRAM = 'kg'
+    UNIT_GRAM = 'g'
+
+    # Imperial
+    UNIT_POUND = 'lb'
+    UNIT_OUNCE = 'oz'
+
+    CHOICES = (
+        (UNIT_KILOGRAM, _('Kilograms')),
+        (UNIT_GRAM, _('Grams')),
+        (UNIT_POUND, _('Pounds')),
+        (UNIT_OUNCE, _('Ounces')),
+    )
+
+
+#
+# CableTerminations
+#
+
+class CableEndChoices(ChoiceSet):
+
+    SIDE_A = 'A'
+    SIDE_B = 'B'
+
+    CHOICES = (
+        (SIDE_A, 'A'),
+        (SIDE_B, 'B'),
+        # ('', ''),
     )
 
 
@@ -1228,10 +1603,10 @@ class PowerFeedStatusChoices(ChoiceSet):
     STATUS_FAILED = 'failed'
 
     CHOICES = [
-        (STATUS_OFFLINE, 'Offline', 'gray'),
-        (STATUS_ACTIVE, 'Active', 'green'),
-        (STATUS_PLANNED, 'Planned', 'blue'),
-        (STATUS_FAILED, 'Failed', 'red'),
+        (STATUS_OFFLINE, _('Offline'), 'gray'),
+        (STATUS_ACTIVE, _('Active'), 'green'),
+        (STATUS_PLANNED, _('Planned'), 'blue'),
+        (STATUS_FAILED, _('Failed'), 'red'),
     ]
 
 
@@ -1241,8 +1616,8 @@ class PowerFeedTypeChoices(ChoiceSet):
     TYPE_REDUNDANT = 'redundant'
 
     CHOICES = (
-        (TYPE_PRIMARY, 'Primary', 'green'),
-        (TYPE_REDUNDANT, 'Redundant', 'cyan'),
+        (TYPE_PRIMARY, _('Primary'), 'green'),
+        (TYPE_REDUNDANT, _('Redundant'), 'cyan'),
     )
 
 
@@ -1263,6 +1638,23 @@ class PowerFeedPhaseChoices(ChoiceSet):
     PHASE_3PHASE = 'three-phase'
 
     CHOICES = (
-        (PHASE_SINGLE, 'Single phase'),
-        (PHASE_3PHASE, 'Three-phase'),
+        (PHASE_SINGLE, _('Single phase')),
+        (PHASE_3PHASE, _('Three-phase')),
     )
+
+
+#
+# VDC
+#
+class VirtualDeviceContextStatusChoices(ChoiceSet):
+    key = 'VirtualDeviceContext.status'
+
+    STATUS_ACTIVE = 'active'
+    STATUS_PLANNED = 'planned'
+    STATUS_OFFLINE = 'offline'
+
+    CHOICES = [
+        (STATUS_ACTIVE, _('Active'), 'green'),
+        (STATUS_PLANNED, _('Planned'), 'cyan'),
+        (STATUS_OFFLINE, _('Offline'), 'red'),
+    ]

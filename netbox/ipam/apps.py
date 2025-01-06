@@ -6,4 +6,8 @@ class IPAMConfig(AppConfig):
     verbose_name = "IPAM"
 
     def ready(self):
-        import ipam.signals
+        from netbox.models.features import register_models
+        from . import signals, search  # noqa: F401
+
+        # Register models
+        register_models(*self.get_models())

@@ -1,50 +1,114 @@
-from circuits import filtersets, models
-from netbox.graphql.types import ObjectType, OrganizationalObjectType, NetBoxObjectType
+from typing import Annotated, List
+
+import strawberry
+import strawberry_django
+
+from circuits import models
+from dcim.graphql.mixins import CabledObjectMixin
+from extras.graphql.mixins import ContactsMixin, CustomFieldsMixin, TagsMixin
+from netbox.graphql.types import BaseObjectType, NetBoxObjectType, ObjectType, OrganizationalObjectType
+from tenancy.graphql.types import TenantType
+from .filters import *
 
 __all__ = (
     'CircuitTerminationType',
     'CircuitType',
+    'CircuitGroupAssignmentType',
+    'CircuitGroupType',
     'CircuitTypeType',
     'ProviderType',
+    'ProviderAccountType',
     'ProviderNetworkType',
 )
 
 
-class CircuitTerminationType(ObjectType):
+@strawberry_django.type(
+    models.Provider,
+    fields='__all__',
+    filters=ProviderFilter
+)
+class ProviderType(NetBoxObjectType, ContactsMixin):
 
-    class Meta:
-        model = models.CircuitTermination
-        fields = '__all__'
-        filterset_class = filtersets.CircuitTerminationFilterSet
-
-
-class CircuitType(NetBoxObjectType):
-
-    class Meta:
-        model = models.Circuit
-        fields = '__all__'
-        filterset_class = filtersets.CircuitFilterSet
+    networks: List[Annotated["ProviderNetworkType", strawberry.lazy('circuits.graphql.types')]]
+    circuits: List[Annotated["CircuitType", strawberry.lazy('circuits.graphql.types')]]
+    asns: List[Annotated["ASNType", strawberry.lazy('ipam.graphql.types')]]
+    accounts: List[Annotated["ProviderAccountType", strawberry.lazy('circuits.graphql.types')]]
 
 
-class CircuitTypeType(OrganizationalObjectType):
+@strawberry_django.type(
+    models.ProviderAccount,
+    fields='__all__',
+    filters=ProviderAccountFilter
+)
+class ProviderAccountType(NetBoxObjectType):
+    provider: Annotated["ProviderType", strawberry.lazy('circuits.graphql.types')]
 
-    class Meta:
-        model = models.CircuitType
-        fields = '__all__'
-        filterset_class = filtersets.CircuitTypeFilterSet
-
-
-class ProviderType(NetBoxObjectType):
-
-    class Meta:
-        model = models.Provider
-        fields = '__all__'
-        filterset_class = filtersets.ProviderFilterSet
+    circuits: List[Annotated["CircuitType", strawberry.lazy('circuits.graphql.types')]]
 
 
+@strawberry_django.type(
+    models.ProviderNetwork,
+    fields='__all__',
+    filters=ProviderNetworkFilter
+)
 class ProviderNetworkType(NetBoxObjectType):
+    provider: Annotated["ProviderType", strawberry.lazy('circuits.graphql.types')]
 
-    class Meta:
-        model = models.ProviderNetwork
-        fields = '__all__'
-        filterset_class = filtersets.ProviderNetworkFilterSet
+    circuit_terminations: List[Annotated["CircuitTerminationType", strawberry.lazy('circuits.graphql.types')]]
+
+
+@strawberry_django.type(
+    models.CircuitTermination,
+    fields='__all__',
+    filters=CircuitTerminationFilter
+)
+class CircuitTerminationType(CustomFieldsMixin, TagsMixin, CabledObjectMixin, ObjectType):
+    circuit: Annotated["CircuitType", strawberry.lazy('circuits.graphql.types')]
+    provider_network: Annotated["ProviderNetworkType", strawberry.lazy('circuits.graphql.types')] | None
+    site: Annotated["SiteType", strawberry.lazy('dcim.graphql.types')] | None
+
+
+@strawberry_django.type(
+    models.CircuitType,
+    fields='__all__',
+    filters=CircuitTypeFilter
+)
+class CircuitTypeType(OrganizationalObjectType):
+    color: str
+
+    circuits: List[Annotated["CircuitType", strawberry.lazy('circuits.graphql.types')]]
+
+
+@strawberry_django.type(
+    models.Circuit,
+    fields='__all__',
+    filters=CircuitFilter
+)
+class CircuitType(NetBoxObjectType, ContactsMixin):
+    provider: ProviderType
+    provider_account: ProviderAccountType | None
+    termination_a: CircuitTerminationType | None
+    termination_z: CircuitTerminationType | None
+    type: CircuitTypeType
+    tenant: TenantType | None
+
+    terminations: List[CircuitTerminationType]
+
+
+@strawberry_django.type(
+    models.CircuitGroup,
+    fields='__all__',
+    filters=CircuitGroupFilter
+)
+class CircuitGroupType(OrganizationalObjectType):
+    tenant: TenantType | None
+
+
+@strawberry_django.type(
+    models.CircuitGroupAssignment,
+    fields='__all__',
+    filters=CircuitGroupAssignmentFilter
+)
+class CircuitGroupAssignmentType(TagsMixin, BaseObjectType):
+    group: Annotated["CircuitGroupType", strawberry.lazy('circuits.graphql.types')]
+    circuit: Annotated["CircuitType", strawberry.lazy('circuits.graphql.types')]

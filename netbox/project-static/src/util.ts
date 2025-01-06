@@ -1,8 +1,10 @@
-import Cookie from 'cookie';
-
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 type ReqData = URLSearchParams | Dict | undefined | unknown;
 type SelectedOption = { name: string; options: string[] };
+
+declare global {
+    interface Window { CSRF_TOKEN: any; }
+}
 
 /**
  * Infer valid HTMLElement props based on element name.
@@ -93,23 +95,12 @@ export function isElement(obj: Element | null | undefined): obj is Element {
   return typeof obj !== null && typeof obj !== 'undefined';
 }
 
-/**
- * Retrieve the CSRF token from cookie storage.
- */
-function getCsrfToken(): string {
-  const { csrftoken: csrfToken } = Cookie.parse(document.cookie);
-  if (typeof csrfToken === 'undefined') {
-    throw new Error('Invalid or missing CSRF token');
-  }
-  return csrfToken;
-}
-
 export async function apiRequest<R extends Dict, D extends ReqData = undefined>(
   url: string,
   method: Method,
   data?: D,
 ): Promise<APIResponse<R>> {
-  const token = getCsrfToken();
+  const token = window.CSRF_TOKEN;
   const headers = new Headers({ 'X-CSRFToken': token });
 
   let body;
@@ -254,29 +245,6 @@ export function getSelectedOptions<E extends HTMLElement>(
 }
 
 /**
- * Get data that can only be accessed via Django context, and is thus already rendered in the HTML
- * template.
- *
- * @see Templates requiring Django context data have a `{% block data %}` block.
- *
- * @param key Property name, which must exist on the HTML element. If not already prefixed with
- *            `data-`, `data-` will be prepended to the property.
- * @returns Value if it exists, `null` if not.
- */
-export function getNetboxData(key: string): string | null {
-  if (!key.startsWith('data-')) {
-    key = `data-${key}`;
-  }
-  for (const element of getElements('body > div#netbox-data > *')) {
-    const value = element.getAttribute(key);
-    if (isTruthy(value)) {
-      return value;
-    }
-  }
-  return null;
-}
-
-/**
  * Toggle visibility of an element.
  */
 export function toggleVisibility<E extends HTMLElement | SVGElement>(
@@ -404,16 +372,6 @@ export function createElement<
     element.appendChild(child);
   }
   return element as HTMLElementTagNameMap[T];
-}
-
-/**
- * Convert Celsius to Fahrenheit, for NAPALM temperature sensors.
- *
- * @param celsius Degrees in Celsius.
- * @returns Degrees in Fahrenheit.
- */
-export function cToF(celsius: number): number {
-  return Math.round((celsius * (9 / 5) + 32 + Number.EPSILON) * 10) / 10;
 }
 
 /**

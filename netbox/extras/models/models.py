@@ -1,137 +1,238 @@
 import json
-import uuid
+import urllib.parse
 
-from django.contrib import admin
-from django.contrib.auth.models import User
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.contrib.contenttypes.models import ContentType
-from django.core.cache import cache
+from django.conf import settings
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.postgres.fields import ArrayField
 from django.core.validators import ValidationError
 from django.db import models
 from django.http import HttpResponse
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.formats import date_format
+from django.utils.translation import gettext_lazy as _
 from rest_framework.utils.encoders import JSONEncoder
-import django_rq
 
+from core.models import ObjectType
 from extras.choices import *
-from extras.constants import *
 from extras.conditions import ConditionSet
-from extras.utils import FeatureQuery, image_upload
+from extras.constants import *
+from extras.utils import image_upload
+from netbox.config import get_config
+from netbox.events import get_event_type_choices
 from netbox.models import ChangeLoggedModel
 from netbox.models.features import (
-    CustomFieldsMixin, CustomLinksMixin, ExportTemplatesMixin, JobResultsMixin, TagsMixin, WebhooksMixin,
+    CloningMixin, CustomFieldsMixin, CustomLinksMixin, ExportTemplatesMixin, SyncedDataMixin, TagsMixin,
 )
+from utilities.html import clean_html
+from utilities.jinja2 import render_jinja2
+from utilities.querydict import dict_to_querydict
 from utilities.querysets import RestrictedQuerySet
-from utilities.utils import render_jinja2
 
 __all__ = (
-    'ConfigRevision',
+    'Bookmark',
     'CustomLink',
+    'EventRule',
     'ExportTemplate',
     'ImageAttachment',
-    'JobResult',
     'JournalEntry',
-    'Report',
-    'Script',
+    'SavedFilter',
     'Webhook',
 )
 
 
-class Webhook(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
+class EventRule(CustomFieldsMixin, ExportTemplatesMixin, TagsMixin, ChangeLoggedModel):
+    """
+    An EventRule defines an action to be taken automatically in response to a specific set of events, such as when a
+    specific type of object is created, modified, or deleted. The action to be taken might entail transmitting a
+    webhook or executing a custom script.
+    """
+    object_types = models.ManyToManyField(
+        to='core.ObjectType',
+        related_name='event_rules',
+        verbose_name=_('object types'),
+        help_text=_("The object(s) to which this rule applies.")
+    )
+    name = models.CharField(
+        verbose_name=_('name'),
+        max_length=150,
+        unique=True
+    )
+    description = models.CharField(
+        verbose_name=_('description'),
+        max_length=200,
+        blank=True
+    )
+    event_types = ArrayField(
+        base_field=models.CharField(max_length=50, choices=get_event_type_choices),
+        help_text=_("The types of event which will trigger this rule.")
+    )
+    enabled = models.BooleanField(
+        verbose_name=_('enabled'),
+        default=True
+    )
+    conditions = models.JSONField(
+        verbose_name=_('conditions'),
+        blank=True,
+        null=True,
+        help_text=_("A set of conditions which determine whether the event will be generated.")
+    )
+
+    # Action to take
+    action_type = models.CharField(
+        max_length=30,
+        choices=EventRuleActionChoices,
+        default=EventRuleActionChoices.WEBHOOK,
+        verbose_name=_('action type')
+    )
+    action_object_type = models.ForeignKey(
+        to='contenttypes.ContentType',
+        related_name='eventrule_actions',
+        on_delete=models.CASCADE
+    )
+    action_object_id = models.PositiveBigIntegerField(
+        blank=True,
+        null=True
+    )
+    action_object = GenericForeignKey(
+        ct_field='action_object_type',
+        fk_field='action_object_id'
+    )
+    action_data = models.JSONField(
+        verbose_name=_('data'),
+        blank=True,
+        null=True,
+        help_text=_("Additional data to pass to the action object")
+    )
+    comments = models.TextField(
+        verbose_name=_('comments'),
+        blank=True
+    )
+
+    class Meta:
+        ordering = ('name',)
+        indexes = (
+            models.Index(fields=('action_object_type', 'action_object_id')),
+        )
+        verbose_name = _('event rule')
+        verbose_name_plural = _('event rules')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse('extras:eventrule', args=[self.pk])
+
+    def clean(self):
+        super().clean()
+
+        # Validate that any conditions are in the correct format
+        if self.conditions:
+            try:
+                ConditionSet(self.conditions)
+            except ValueError as e:
+                raise ValidationError({'conditions': e})
+
+    def eval_conditions(self, data):
+        """
+        Test whether the given data meets the conditions of the event rule (if any). Return True
+        if met or no conditions are specified.
+        """
+        if not self.conditions:
+            return True
+
+        return ConditionSet(self.conditions).eval(data)
+
+
+class Webhook(CustomFieldsMixin, ExportTemplatesMixin, TagsMixin, ChangeLoggedModel):
     """
     A Webhook defines a request that will be sent to a remote application when an object is created, updated, and/or
     delete in NetBox. The request will contain a representation of the object, which the remote application can act on.
     Each Webhook can be limited to firing only on certain actions or certain object types.
     """
-    content_types = models.ManyToManyField(
-        to=ContentType,
-        related_name='webhooks',
-        verbose_name='Object types',
-        limit_choices_to=FeatureQuery('webhooks'),
-        help_text="The object(s) to which this Webhook applies."
-    )
     name = models.CharField(
+        verbose_name=_('name'),
         max_length=150,
         unique=True
     )
-    type_create = models.BooleanField(
-        default=False,
-        help_text="Call this webhook when a matching object is created."
-    )
-    type_update = models.BooleanField(
-        default=False,
-        help_text="Call this webhook when a matching object is updated."
-    )
-    type_delete = models.BooleanField(
-        default=False,
-        help_text="Call this webhook when a matching object is deleted."
+    description = models.CharField(
+        verbose_name=_('description'),
+        max_length=200,
+        blank=True
     )
     payload_url = models.CharField(
         max_length=500,
-        verbose_name='URL',
-        help_text='This URL will be called using the HTTP method defined when the webhook is called. '
-                  'Jinja2 template processing is supported with the same context as the request body.'
-    )
-    enabled = models.BooleanField(
-        default=True
+        verbose_name=_('URL'),
+        help_text=_(
+            "This URL will be called using the HTTP method defined when the webhook is called. Jinja2 template "
+            "processing is supported with the same context as the request body."
+        )
     )
     http_method = models.CharField(
         max_length=30,
         choices=WebhookHttpMethodChoices,
         default=WebhookHttpMethodChoices.METHOD_POST,
-        verbose_name='HTTP method'
+        verbose_name=_('HTTP method')
     )
     http_content_type = models.CharField(
         max_length=100,
         default=HTTP_CONTENT_TYPE_JSON,
-        verbose_name='HTTP content type',
-        help_text='The complete list of official content types is available '
-                  '<a href="https://www.iana.org/assignments/media-types/media-types.xhtml">here</a>.'
+        verbose_name=_('HTTP content type'),
+        help_text=_(
+            'The complete list of official content types is available '
+            '<a href="https://www.iana.org/assignments/media-types/media-types.xhtml">here</a>.'
+        )
     )
     additional_headers = models.TextField(
+        verbose_name=_('additional headers'),
         blank=True,
-        help_text="User-supplied HTTP headers to be sent with the request in addition to the HTTP content type. "
-                  "Headers should be defined in the format <code>Name: Value</code>. Jinja2 template processing is "
-                  "supported with the same context as the request body (below)."
+        help_text=_(
+            "User-supplied HTTP headers to be sent with the request in addition to the HTTP content type. Headers "
+            "should be defined in the format <code>Name: Value</code>. Jinja2 template processing is supported with "
+            "the same context as the request body (below)."
+        )
     )
     body_template = models.TextField(
+        verbose_name=_('body template'),
         blank=True,
-        help_text='Jinja2 template for a custom request body. If blank, a JSON object representing the change will be '
-                  'included. Available context data includes: <code>event</code>, <code>model</code>, '
-                  '<code>timestamp</code>, <code>username</code>, <code>request_id</code>, and <code>data</code>.'
+        help_text=_(
+            "Jinja2 template for a custom request body. If blank, a JSON object representing the change will be "
+            "included. Available context data includes: <code>event</code>, <code>model</code>, "
+            "<code>timestamp</code>, <code>username</code>, <code>request_id</code>, and <code>data</code>."
+        )
     )
     secret = models.CharField(
+        verbose_name=_('secret'),
         max_length=255,
         blank=True,
-        help_text="When provided, the request will include a 'X-Hook-Signature' "
-                  "header containing a HMAC hex digest of the payload body using "
-                  "the secret as the key. The secret is not transmitted in "
-                  "the request."
-    )
-    conditions = models.JSONField(
-        blank=True,
-        null=True,
-        help_text="A set of conditions which determine whether the webhook will be generated."
+        help_text=_(
+            "When provided, the request will include a <code>X-Hook-Signature</code> header containing a HMAC hex "
+            "digest of the payload body using the secret as the key. The secret is not transmitted in the request."
+        )
     )
     ssl_verification = models.BooleanField(
         default=True,
-        verbose_name='SSL verification',
-        help_text="Enable SSL certificate verification. Disable with caution!"
+        verbose_name=_('SSL verification'),
+        help_text=_("Enable SSL certificate verification. Disable with caution!")
     )
     ca_file_path = models.CharField(
         max_length=4096,
         null=True,
         blank=True,
-        verbose_name='CA File Path',
-        help_text='The specific CA certificate file to use for SSL verification. '
-                  'Leave blank to use the system defaults.'
+        verbose_name=_('CA File Path'),
+        help_text=_(
+            "The specific CA certificate file to use for SSL verification. Leave blank to use the system defaults."
+        )
+    )
+    events = GenericRelation(
+        EventRule,
+        content_type_field='action_object_type',
+        object_id_field='action_object_id'
     )
 
     class Meta:
         ordering = ('name',)
-        unique_together = ('payload_url', 'type_create', 'type_update', 'type_delete',)
+        verbose_name = _('webhook')
+        verbose_name_plural = _('webhooks')
 
     def __str__(self):
         return self.name
@@ -139,23 +240,17 @@ class Webhook(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
     def get_absolute_url(self):
         return reverse('extras:webhook', args=[self.pk])
 
+    @property
+    def docs_url(self):
+        return f'{settings.STATIC_URL}docs/models/extras/webhook/'
+
     def clean(self):
         super().clean()
-
-        # At least one action type must be selected
-        if not self.type_create and not self.type_delete and not self.type_update:
-            raise ValidationError("At least one type must be selected: create, update, and/or delete.")
-
-        if self.conditions:
-            try:
-                ConditionSet(self.conditions)
-            except ValueError as e:
-                raise ValidationError({'conditions': e})
 
         # CA file path requires SSL verification enabled
         if not self.ssl_verification and self.ca_file_path:
             raise ValidationError({
-                'ca_file_path': 'Do not specify a CA certificate file if SSL verification is disabled.'
+                'ca_file_path': _('Do not specify a CA certificate file if SSL verification is disabled.')
             })
 
     def render_headers(self, context):
@@ -187,53 +282,64 @@ class Webhook(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
         return render_jinja2(self.payload_url, context)
 
 
-class CustomLink(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
+class CustomLink(CloningMixin, ExportTemplatesMixin, ChangeLoggedModel):
     """
     A custom link to an external representation of a NetBox object. The link text and URL fields accept Jinja2 template
     code to be rendered with an object as context.
     """
-    content_type = models.ForeignKey(
-        to=ContentType,
-        on_delete=models.CASCADE,
-        limit_choices_to=FeatureQuery('custom_links')
+    object_types = models.ManyToManyField(
+        to='core.ObjectType',
+        related_name='custom_links',
+        help_text=_('The object type(s) to which this link applies.')
     )
     name = models.CharField(
+        verbose_name=_('name'),
         max_length=100,
         unique=True
     )
     enabled = models.BooleanField(
+        verbose_name=_('enabled'),
         default=True
     )
-    link_text = models.CharField(
-        max_length=500,
-        help_text="Jinja2 template code for link text"
+    link_text = models.TextField(
+        verbose_name=_('link text'),
+        help_text=_("Jinja2 template code for link text")
     )
-    link_url = models.CharField(
-        max_length=500,
-        verbose_name='Link URL',
-        help_text="Jinja2 template code for link URL"
+    link_url = models.TextField(
+        verbose_name=_('link URL'),
+        help_text=_("Jinja2 template code for link URL")
     )
     weight = models.PositiveSmallIntegerField(
+        verbose_name=_('weight'),
         default=100
     )
     group_name = models.CharField(
+        verbose_name=_('group name'),
         max_length=50,
         blank=True,
-        help_text="Links with the same group will appear as a dropdown menu"
+        help_text=_("Links with the same group will appear as a dropdown menu")
     )
     button_class = models.CharField(
+        verbose_name=_('button class'),
         max_length=30,
         choices=CustomLinkButtonClassChoices,
         default=CustomLinkButtonClassChoices.DEFAULT,
-        help_text="The class of the first link in a group will be used for the dropdown button"
+        help_text=_("The class of the first link in a group will be used for the dropdown button")
     )
     new_window = models.BooleanField(
+        verbose_name=_('new window'),
         default=False,
-        help_text="Force link to open in a new window"
+        help_text=_("Force link to open in a new window")
+    )
+
+    clone_fields = (
+        'object_types', 'enabled', 'weight', 'group_name', 'button_class', 'new_window',
     )
 
     class Meta:
         ordering = ['group_name', 'weight', 'name']
+        verbose_name = _('custom link')
+        verbose_name_plural = _('custom links')
 
     def __str__(self):
         return self.name
@@ -241,17 +347,33 @@ class CustomLink(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
     def get_absolute_url(self):
         return reverse('extras:customlink', args=[self.pk])
 
+    @property
+    def docs_url(self):
+        return f'{settings.STATIC_URL}docs/models/extras/customlink/'
+
     def render(self, context):
         """
         Render the CustomLink given the provided context, and return the text, link, and link_target.
 
         :param context: The context passed to Jinja2
         """
-        text = render_jinja2(self.link_text, context)
+        text = render_jinja2(self.link_text, context).strip()
         if not text:
             return {}
-        link = render_jinja2(self.link_url, context)
+        link = render_jinja2(self.link_url, context).strip()
         link_target = ' target="_blank"' if self.new_window else ''
+
+        # Sanitize link text
+        allowed_schemes = get_config().ALLOWED_URL_SCHEMES
+        text = clean_html(text, allowed_schemes)
+
+        # Sanitize link
+        link = urllib.parse.quote(link, safe='/:?&=%+[]@#,;!')
+
+        # Verify link scheme is allowed
+        result = urllib.parse.urlparse(link)
+        if result.scheme and result.scheme not in allowed_schemes:
+            link = ""
 
         return {
             'text': text,
@@ -260,58 +382,78 @@ class CustomLink(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
         }
 
 
-class ExportTemplate(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
-    content_type = models.ForeignKey(
-        to=ContentType,
-        on_delete=models.CASCADE,
-        limit_choices_to=FeatureQuery('export_templates')
+class ExportTemplate(SyncedDataMixin, CloningMixin, ExportTemplatesMixin, ChangeLoggedModel):
+    object_types = models.ManyToManyField(
+        to='core.ObjectType',
+        related_name='export_templates',
+        help_text=_('The object type(s) to which this template applies.')
     )
     name = models.CharField(
+        verbose_name=_('name'),
         max_length=100
     )
     description = models.CharField(
+        verbose_name=_('description'),
         max_length=200,
         blank=True
     )
     template_code = models.TextField(
-        help_text='Jinja2 template code. The list of objects being exported is passed as a context variable named '
-                  '<code>queryset</code>.'
+        help_text=_(
+            "Jinja2 template code. The list of objects being exported is passed as a context variable named "
+            "<code>queryset</code>."
+        )
     )
     mime_type = models.CharField(
         max_length=50,
         blank=True,
-        verbose_name='MIME type',
-        help_text='Defaults to <code>text/plain</code>'
+        verbose_name=_('MIME type'),
+        help_text=_('Defaults to <code>text/plain; charset=utf-8</code>')
     )
     file_extension = models.CharField(
+        verbose_name=_('file extension'),
         max_length=15,
         blank=True,
-        help_text='Extension to append to the rendered filename'
+        help_text=_('Extension to append to the rendered filename')
     )
     as_attachment = models.BooleanField(
+        verbose_name=_('as attachment'),
         default=True,
-        help_text="Download file as attachment"
+        help_text=_("Download file as attachment")
+    )
+
+    clone_fields = (
+        'object_types', 'template_code', 'mime_type', 'file_extension', 'as_attachment',
     )
 
     class Meta:
-        ordering = ['content_type', 'name']
-        unique_together = [
-            ['content_type', 'name']
-        ]
+        ordering = ('name',)
+        verbose_name = _('export template')
+        verbose_name_plural = _('export templates')
 
     def __str__(self):
-        return f"{self.content_type}: {self.name}"
+        return self.name
 
     def get_absolute_url(self):
         return reverse('extras:exporttemplate', args=[self.pk])
+
+    @property
+    def docs_url(self):
+        return f'{settings.STATIC_URL}docs/models/extras/exporttemplate/'
 
     def clean(self):
         super().clean()
 
         if self.name.lower() == 'table':
             raise ValidationError({
-                'name': f'"{self.name}" is a reserved name. Please choose a different name.'
+                'name': _('"{name}" is a reserved name. Please choose a different name.').format(name=self.name)
             })
+
+    def sync_data(self):
+        """
+        Synchronize template content from the designated DataFile (if any).
+        """
+        self.template_code = self.data_file.data_as_string
+    sync_data.alters_data = True
 
     def render(self, queryset):
         """
@@ -332,7 +474,7 @@ class ExportTemplate(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
         Render the template to an HTTP response, delivered as a named file attachment
         """
         output = self.render(queryset)
-        mime_type = 'text/plain' if not self.mime_type else self.mime_type
+        mime_type = 'text/plain; charset=utf-8' if not self.mime_type else self.mime_type
 
         # Build the response
         response = HttpResponse(output, content_type=mime_type)
@@ -346,17 +488,97 @@ class ExportTemplate(ExportTemplatesMixin, WebhooksMixin, ChangeLoggedModel):
         return response
 
 
-class ImageAttachment(WebhooksMixin, ChangeLoggedModel):
+class SavedFilter(CloningMixin, ExportTemplatesMixin, ChangeLoggedModel):
+    """
+    A set of predefined keyword parameters that can be reused to filter for specific objects.
+    """
+    object_types = models.ManyToManyField(
+        to='core.ObjectType',
+        related_name='saved_filters',
+        help_text=_('The object type(s) to which this filter applies.')
+    )
+    name = models.CharField(
+        verbose_name=_('name'),
+        max_length=100,
+        unique=True
+    )
+    slug = models.SlugField(
+        verbose_name=_('slug'),
+        max_length=100,
+        unique=True
+    )
+    description = models.CharField(
+        verbose_name=_('description'),
+        max_length=200,
+        blank=True
+    )
+    user = models.ForeignKey(
+        to=settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True
+    )
+    weight = models.PositiveSmallIntegerField(
+        verbose_name=_('weight'),
+        default=100
+    )
+    enabled = models.BooleanField(
+        verbose_name=_('enabled'),
+        default=True
+    )
+    shared = models.BooleanField(
+        verbose_name=_('shared'),
+        default=True
+    )
+    parameters = models.JSONField(
+        verbose_name=_('parameters')
+    )
+
+    clone_fields = (
+        'object_types', 'weight', 'enabled', 'parameters',
+    )
+
+    class Meta:
+        ordering = ('weight', 'name')
+        verbose_name = _('saved filter')
+        verbose_name_plural = _('saved filters')
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse('extras:savedfilter', args=[self.pk])
+
+    @property
+    def docs_url(self):
+        return f'{settings.STATIC_URL}docs/models/extras/savedfilter/'
+
+    def clean(self):
+        super().clean()
+
+        # Verify that `parameters` is a JSON object
+        if type(self.parameters) is not dict:
+            raise ValidationError(
+                {'parameters': _('Filter parameters must be stored as a dictionary of keyword arguments.')}
+            )
+
+    @property
+    def url_params(self):
+        qd = dict_to_querydict(self.parameters)
+        return qd.urlencode()
+
+
+class ImageAttachment(ChangeLoggedModel):
     """
     An uploaded image which is associated with an object.
     """
-    content_type = models.ForeignKey(
-        to=ContentType,
+    object_type = models.ForeignKey(
+        to='contenttypes.ContentType',
         on_delete=models.CASCADE
     )
     object_id = models.PositiveBigIntegerField()
     parent = GenericForeignKey(
-        ct_field='content_type',
+        ct_field='object_type',
         fk_field='object_id'
     )
     image = models.ImageField(
@@ -364,25 +586,44 @@ class ImageAttachment(WebhooksMixin, ChangeLoggedModel):
         height_field='image_height',
         width_field='image_width'
     )
-    image_height = models.PositiveSmallIntegerField()
-    image_width = models.PositiveSmallIntegerField()
+    image_height = models.PositiveSmallIntegerField(
+        verbose_name=_('image height'),
+    )
+    image_width = models.PositiveSmallIntegerField(
+        verbose_name=_('image width'),
+    )
     name = models.CharField(
+        verbose_name=_('name'),
         max_length=50,
         blank=True
     )
 
     objects = RestrictedQuerySet.as_manager()
 
-    clone_fields = ('content_type', 'object_id')
+    clone_fields = ('object_type', 'object_id')
 
     class Meta:
         ordering = ('name', 'pk')  # name may be non-unique
+        indexes = (
+            models.Index(fields=('object_type', 'object_id')),
+        )
+        verbose_name = _('image attachment')
+        verbose_name_plural = _('image attachments')
 
     def __str__(self):
         if self.name:
             return self.name
         filename = self.image.name.rsplit('/', 1)[-1]
         return filename.split('_', 2)[2]
+
+    def clean(self):
+        super().clean()
+
+        # Validate the assigned object type
+        if self.object_type not in ObjectType.objects.with_feature('image_attachments'):
+            raise ValidationError(
+                _("Image attachments cannot be assigned to this object type ({type}).").format(type=self.object_type)
+            )
 
     def delete(self, *args, **kwargs):
 
@@ -422,14 +663,14 @@ class ImageAttachment(WebhooksMixin, ChangeLoggedModel):
         return objectchange
 
 
-class JournalEntry(CustomFieldsMixin, CustomLinksMixin, TagsMixin, WebhooksMixin, ChangeLoggedModel):
+class JournalEntry(CustomFieldsMixin, CustomLinksMixin, TagsMixin, ExportTemplatesMixin, ChangeLoggedModel):
     """
     A historical remark concerning an object; collectively, these form an object's journal. The journal is used to
     preserve historical context around an object, and complements NetBox's built-in change logging. For example, you
     might record a new journal entry when a device undergoes maintenance, or when a prefix is expanded.
     """
     assigned_object_type = models.ForeignKey(
-        to=ContentType,
+        to='contenttypes.ContentType',
         on_delete=models.CASCADE
     )
     assigned_object_id = models.PositiveBigIntegerField()
@@ -438,181 +679,97 @@ class JournalEntry(CustomFieldsMixin, CustomLinksMixin, TagsMixin, WebhooksMixin
         fk_field='assigned_object_id'
     )
     created_by = models.ForeignKey(
-        to=User,
+        to=settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         blank=True,
         null=True
     )
     kind = models.CharField(
+        verbose_name=_('kind'),
         max_length=30,
         choices=JournalEntryKindChoices,
         default=JournalEntryKindChoices.KIND_INFO
     )
-    comments = models.TextField()
+    comments = models.TextField(
+        verbose_name=_('comments'),
+    )
 
     class Meta:
         ordering = ('-created',)
-        verbose_name_plural = 'journal entries'
+        indexes = (
+            models.Index(fields=('assigned_object_type', 'assigned_object_id')),
+        )
+        verbose_name = _('journal entry')
+        verbose_name_plural = _('journal entries')
 
     def __str__(self):
         created = timezone.localtime(self.created)
-        return f"{date_format(created, format='SHORT_DATETIME_FORMAT')} ({self.get_kind_display()})"
+        return f"{created.date().isoformat()} {created.time().isoformat(timespec='minutes')} ({self.get_kind_display()})"
 
     def get_absolute_url(self):
         return reverse('extras:journalentry', args=[self.pk])
+
+    def clean(self):
+        super().clean()
+
+        # Validate the assigned object type
+        if self.assigned_object_type not in ObjectType.objects.with_feature('journaling'):
+            raise ValidationError(
+                _("Journaling is not supported for this object type ({type}).").format(type=self.assigned_object_type)
+            )
 
     def get_kind_color(self):
         return JournalEntryKindChoices.colors.get(self.kind)
 
 
-class JobResult(models.Model):
+class Bookmark(models.Model):
     """
-    This model stores the results from running a user-defined report.
+    An object bookmarked by a User.
     """
-    name = models.CharField(
-        max_length=255
-    )
-    obj_type = models.ForeignKey(
-        to=ContentType,
-        related_name='job_results',
-        verbose_name='Object types',
-        limit_choices_to=FeatureQuery('job_results'),
-        help_text="The object type to which this job result applies",
-        on_delete=models.CASCADE,
-    )
     created = models.DateTimeField(
+        verbose_name=_('created'),
         auto_now_add=True
     )
-    completed = models.DateTimeField(
-        null=True,
-        blank=True
+    object_type = models.ForeignKey(
+        to='contenttypes.ContentType',
+        on_delete=models.PROTECT
+    )
+    object_id = models.PositiveBigIntegerField()
+    object = GenericForeignKey(
+        ct_field='object_type',
+        fk_field='object_id'
     )
     user = models.ForeignKey(
-        to=User,
-        on_delete=models.SET_NULL,
-        related_name='+',
-        blank=True,
-        null=True
+        to=settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE
     )
-    status = models.CharField(
-        max_length=30,
-        choices=JobResultStatusChoices,
-        default=JobResultStatusChoices.STATUS_PENDING
-    )
-    data = models.JSONField(
-        null=True,
-        blank=True
-    )
-    job_id = models.UUIDField(
-        unique=True
-    )
+
+    objects = RestrictedQuerySet.as_manager()
 
     class Meta:
-        ordering = ['obj_type', 'name', '-created']
-
-    def __str__(self):
-        return str(self.job_id)
-
-    @property
-    def duration(self):
-        if not self.completed:
-            return None
-
-        duration = self.completed - self.created
-        minutes, seconds = divmod(duration.total_seconds(), 60)
-
-        return f"{int(minutes)} minutes, {seconds:.2f} seconds"
-
-    def set_status(self, status):
-        """
-        Helper method to change the status of the job result. If the target status is terminal, the  completion
-        time is also set.
-        """
-        self.status = status
-        if status in JobResultStatusChoices.TERMINAL_STATE_CHOICES:
-            self.completed = timezone.now()
-
-    @classmethod
-    def enqueue_job(cls, func, name, obj_type, user, *args, **kwargs):
-        """
-        Create a JobResult instance and enqueue a job using the given callable
-
-        func: The callable object to be enqueued for execution
-        name: Name for the JobResult instance
-        obj_type: ContentType to link to the JobResult instance obj_type
-        user: User object to link to the JobResult instance
-        args: additional args passed to the callable
-        kwargs: additional kargs passed to the callable
-        """
-        job_result = cls.objects.create(
-            name=name,
-            obj_type=obj_type,
-            user=user,
-            job_id=uuid.uuid4()
+        ordering = ('created', 'pk')
+        indexes = (
+            models.Index(fields=('object_type', 'object_id')),
         )
-
-        queue = django_rq.get_queue("default")
-        queue.enqueue(func, job_id=str(job_result.job_id), job_result=job_result, **kwargs)
-
-        return job_result
-
-
-class ConfigRevision(models.Model):
-    """
-    An atomic revision of NetBox's configuration.
-    """
-    created = models.DateTimeField(
-        auto_now_add=True
-    )
-    comment = models.CharField(
-        max_length=200,
-        blank=True
-    )
-    data = models.JSONField(
-        blank=True,
-        null=True,
-        verbose_name='Configuration data'
-    )
+        constraints = (
+            models.UniqueConstraint(
+                fields=('object_type', 'object_id', 'user'),
+                name='%(app_label)s_%(class)s_unique_per_object_and_user'
+            ),
+        )
+        verbose_name = _('bookmark')
+        verbose_name_plural = _('bookmarks')
 
     def __str__(self):
-        return f'Config revision #{self.pk} ({self.created})'
+        if self.object:
+            return str(self.object)
+        return super().__str__()
 
-    def __getattr__(self, item):
-        if item in self.data:
-            return self.data[item]
-        return super().__getattribute__(item)
+    def clean(self):
+        super().clean()
 
-    def activate(self):
-        """
-        Cache the configuration data.
-        """
-        cache.set('config', self.data, None)
-        cache.set('config_version', self.pk, None)
-
-    @admin.display(boolean=True)
-    def is_active(self):
-        return cache.get('config_version') == self.pk
-
-
-#
-# Custom scripts & reports
-#
-
-class Script(JobResultsMixin, models.Model):
-    """
-    Dummy model used to generate permissions for custom scripts. Does not exist in the database.
-    """
-    class Meta:
-        managed = False
-
-
-#
-# Reports
-#
-
-class Report(JobResultsMixin, models.Model):
-    """
-    Dummy model used to generate permissions for reports. Does not exist in the database.
-    """
-    class Meta:
-        managed = False
+        # Validate the assigned object type
+        if self.object_type not in ObjectType.objects.with_feature('bookmarks'):
+            raise ValidationError(
+                _("Bookmarks cannot be assigned to this object type ({type}).").format(type=self.object_type)
+            )

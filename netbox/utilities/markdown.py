@@ -1,6 +1,10 @@
 import markdown
 from markdown.inlinepatterns import SimpleTagPattern
 
+__all__ = (
+    'StrikethroughExtension',
+)
+
 STRIKE_RE = r'(~{2})(.+?)(~{2})'
 
 
@@ -10,7 +14,7 @@ class StrikethroughExtension(markdown.Extension):
     """
     def extendMarkdown(self, md):
         md.inlinePatterns.register(
-            markdown.inlinepatterns.SimpleTagPattern(STRIKE_RE, 'del'),
+            SimpleTagPattern(STRIKE_RE, 'del'),
             'strikethrough',
             200
         )

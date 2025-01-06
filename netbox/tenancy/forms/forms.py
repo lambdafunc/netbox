@@ -1,8 +1,8 @@
 from django import forms
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _
 
 from tenancy.models import *
-from utilities.forms import DynamicModelChoiceField, DynamicModelMultipleChoiceField
+from utilities.forms.fields import DynamicModelChoiceField, DynamicModelMultipleChoiceField
 
 __all__ = (
     'ContactModelFilterForm',
@@ -13,6 +13,7 @@ __all__ = (
 
 class TenancyForm(forms.Form):
     tenant_group = DynamicModelChoiceField(
+        label=_('Tenant group'),
         queryset=TenantGroup.objects.all(),
         required=False,
         null_option='None',
@@ -21,6 +22,7 @@ class TenancyForm(forms.Form):
         }
     )
     tenant = DynamicModelChoiceField(
+        label=_('Tenant'),
         queryset=Tenant.objects.all(),
         required=False,
         query_params={
